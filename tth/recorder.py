@@ -8,7 +8,7 @@ import traceback
 import typer
 
 from tth.constants import ERROR_LOG
-from tth.db import get_connection
+from tth.database import get_connection
 from tth.project import infer_project
 from tth.session import get_or_create
 

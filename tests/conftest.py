@@ -1,5 +1,5 @@
 import pytest
-from tth.db import connect, apply_migrations
+from tth.database import connect, apply_migrations
 
 
 @pytest.fixture

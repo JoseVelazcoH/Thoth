@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from tth.recorder import app
-from tth.db import apply_migrations
+from tth.database import apply_migrations
 
 
 runner = CliRunner()

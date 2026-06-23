@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch
 
-from tth.db import connect, apply_migrations, current_version, fts5_available, MIGRATIONS
+from tth.database import connect, apply_migrations, current_version, fts5_available, MIGRATIONS
 
 
 def _table_names(conn):
@@ -31,7 +31,7 @@ def test_pending_migrations_applied():
     dummy_v1 = "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);"
     dummy_v2 = "CREATE TABLE IF NOT EXISTS _dummy_v2 (x INTEGER);"
     fake_migrations = [(1, dummy_v1), (2, dummy_v2)]
-    with patch("tth.db.MIGRATIONS", fake_migrations):
+    with patch("tth.database.MIGRATIONS", fake_migrations):
         apply_migrations(conn)
     assert current_version(conn) == 2
     conn.close()
@@ -72,7 +72,7 @@ def test_fts5_delete_sync(mem_conn):
 
 def test_fts5_unavailable_no_raise():
     conn = connect()
-    with patch("tth.db.fts5_available", return_value=False):
+    with patch("tth.database.fts5_available", return_value=False):
         apply_migrations(conn)  # should not raise
     conn.close()
 
@@ -94,7 +94,7 @@ def test_migration_is_atomic():
     )
     fake_migrations = [(1, valid_v1), (2, bad_v2)]
 
-    with patch("tth.db.MIGRATIONS", fake_migrations):
+    with patch("tth.database.MIGRATIONS", fake_migrations):
         try:
             apply_migrations(conn)
         except Exception:
@@ -143,7 +143,7 @@ END;
 """
     from unittest.mock import patch
     fake_migrations = list(MIGRATIONS) + [(99, trigger_sql)]
-    with patch("tth.db.MIGRATIONS", fake_migrations):
+    with patch("tth.database.MIGRATIONS", fake_migrations):
         apply_migrations(conn)  # must not raise
 
     # The trigger must exist.
@@ -183,7 +183,7 @@ def test_string_literal_with_semicolon_begin_and_comment():
     )
     from unittest.mock import patch
     fake_migrations = list(MIGRATIONS) + [(98, literal_sql)]
-    with patch("tth.db.MIGRATIONS", fake_migrations):
+    with patch("tth.database.MIGRATIONS", fake_migrations):
         apply_migrations(conn)  # must not raise
 
     row = conn.execute("SELECT val FROM string_test").fetchone()
