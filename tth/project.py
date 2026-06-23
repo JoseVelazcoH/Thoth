@@ -145,13 +145,3 @@ def _check_markers(directory: Path) -> str | None:
                 if name:
                     return name
     return None
-
-
-# ---------------------------------------------------------------------------
-# Legacy parser names kept as thin aliases (for any external callers)
-# ---------------------------------------------------------------------------
-
-_parse_pyproject = _extract_pyproject
-_parse_package_json = _extract_package_json
-_parse_cargo = _extract_cargo
-_parse_gomod = _extract_gomod
