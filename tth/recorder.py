@@ -6,18 +6,16 @@ import sqlite3
 import time
 import traceback
 import typer
+from pathlib import Path
 
-from tth.constants import ERROR_LOG
 from tth.database import get_connection
 from tth.project import infer_project
 from tth.session import get_or_create
 
+ERROR_LOG = Path("~/.local/share/thoth/error.log").expanduser()
+
 app = typer.Typer()
 
-
-# ---------------------------------------------------------------------------
-# Tag normalization
-# ---------------------------------------------------------------------------
 
 
 def _normalize_tags(tags_json) -> str:
@@ -32,10 +30,6 @@ def _normalize_tags(tags_json) -> str:
     except (json.JSONDecodeError, TypeError, ValueError):
         return "[]"
 
-
-# ---------------------------------------------------------------------------
-# Core logic
-# ---------------------------------------------------------------------------
 
 
 def _record_inner(
@@ -120,10 +114,6 @@ def record(
     except Exception as exc:
         _log_error(exc)
 
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 
 @app.command()

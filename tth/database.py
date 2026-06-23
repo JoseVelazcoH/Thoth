@@ -5,14 +5,10 @@ import sqlite3
 import time
 from pathlib import Path
 
-from tth.constants import BUSY_TIMEOUT_MS
-from tth.constants import DEFAULT_DB_PATH
-
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Schema SQL
-# ---------------------------------------------------------------------------
+DEFAULT_DB_PATH = Path("~/.local/share/thoth/history.db").expanduser()
+BUSY_TIMEOUT_MS = 2000
 
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -73,10 +69,6 @@ MIGRATIONS: list[tuple[int, str]] = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Connection helpers
-# ---------------------------------------------------------------------------
-
 
 def connect(db_path: str = ":memory:") -> sqlite3.Connection:
     """Bare connection for tests. Caller must call apply_migrations."""
@@ -97,10 +89,6 @@ def get_connection(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     apply_migrations(conn)
     return conn
 
-
-# ---------------------------------------------------------------------------
-# Migration helpers
-# ---------------------------------------------------------------------------
 
 
 def current_version(conn: sqlite3.Connection) -> int:

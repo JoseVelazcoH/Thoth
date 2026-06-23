@@ -6,13 +6,8 @@ import time
 import tomllib
 from pathlib import Path
 
-from tth.constants import CACHE_TTL_SECONDS as _CACHE_TTL_SECONDS
-from tth.constants import MAX_WALK_DEPTH as _MAX_WALK_DEPTH
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+_CACHE_TTL_SECONDS = 86400  # 24 hours
+_MAX_WALK_DEPTH = 20
 
 
 def infer_project(cwd: str, conn: sqlite3.Connection) -> str:
@@ -29,10 +24,6 @@ def infer_project(cwd: str, conn: sqlite3.Connection) -> str:
 
     return _walk_markers(cwd) or "ungrouped"
 
-
-# ---------------------------------------------------------------------------
-# Internal: file parsers (shared load-and-dig helper)
-# ---------------------------------------------------------------------------
 
 
 def _read_nested(data: dict, *keys: str) -> str | None:
@@ -91,14 +82,7 @@ def _extract_gomod(p: Path) -> str | None:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Marker strategy table (priority order)
-# ---------------------------------------------------------------------------
-# Each entry is (filename, extractor) where extractor receives the full Path
-# to the marker file and returns a project name string or None.
-# Directory-name markers use a lambda that ignores the file path and returns
-# the containing directory's name instead.
-
+# Each entry is (filename, extractor). Directory-name markers use is_dir() check below.
 _MARKER_STRATEGIES: list[tuple[str, object]] = [
     (".git", lambda p: p.parent.name),          # directory marker: use is_dir() check below
     ("package.json", _extract_package_json),
@@ -112,10 +96,6 @@ _MARKER_STRATEGIES: list[tuple[str, object]] = [
 # Filenames that must exist as directories, not regular files.
 _DIR_MARKERS = {".git"}
 
-
-# ---------------------------------------------------------------------------
-# Internal: marker walk
-# ---------------------------------------------------------------------------
 
 
 def _walk_markers(cwd: str) -> str:

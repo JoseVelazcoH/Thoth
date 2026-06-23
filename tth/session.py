@@ -3,7 +3,7 @@
 import sqlite3
 import uuid
 
-from tth.constants import SESSION_GAP_MINUTES
+SESSION_GAP_MINUTES = 30
 
 _GAP_SECONDS = SESSION_GAP_MINUTES * 60
 
