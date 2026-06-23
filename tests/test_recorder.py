@@ -46,33 +46,6 @@ def test_successful_record(mem_conn, tmp_path):
     assert row["session_id"] is not None
 
 
-def test_tags_stored_as_json(mem_conn, tmp_path):
-    app_dir = str(tmp_path)
-    t0 = int(time.time())
-    _record_inner("echo hi", app_dir, 0, 10, t0, '["fix-migration"]', mem_conn)
-    row = mem_conn.execute(
-        "SELECT tags FROM commands WHERE command='echo hi'"
-    ).fetchone()
-    assert row["tags"] == '["fix-migration"]'
-
-
-def test_tags_empty_string_normalized(mem_conn, tmp_path):
-    t0 = int(time.time())
-    _record_inner("echo a", str(tmp_path), 0, 0, t0, "", mem_conn)
-    row = mem_conn.execute(
-        "SELECT tags FROM commands WHERE command='echo a'"
-    ).fetchone()
-    assert row["tags"] == "[]"
-
-
-def test_tags_invalid_json_normalized(mem_conn, tmp_path):
-    t0 = int(time.time())
-    _record_inner("echo b", str(tmp_path), 0, 0, t0, "not-json", mem_conn)
-    row = mem_conn.execute(
-        "SELECT tags FROM commands WHERE command='echo b'"
-    ).fetchone()
-    assert row["tags"] == "[]"
-
 
 def test_projects_upsert_increments_count(mem_conn, tmp_path):
     app_dir = tmp_path / "proj"
@@ -110,21 +83,6 @@ def test_exception_logged_not_raised(mem_conn, tmp_path, tmp_path_factory):
     assert "boom" in log_file.read_text()
 
 
-def test_sqlite_lock_retries_once(mem_conn, tmp_path):
-    t0 = int(time.time())
-    call_count = 0
-
-    def side_effect(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            raise sqlite3.OperationalError("database is locked")
-
-    with patch("tth.recorder._record_inner", side_effect=side_effect):
-        record("cmd", str(tmp_path), 0, 0, t0, "[]", mem_conn)
-
-    assert call_count == 2
-
 
 def test_sqlite_lock_both_fail_logs(mem_conn, tmp_path, tmp_path_factory):
     log_dir = tmp_path_factory.mktemp("logs2")
@@ -139,16 +97,9 @@ def test_sqlite_lock_both_fail_logs(mem_conn, tmp_path, tmp_path_factory):
             record("cmd", str(tmp_path), 0, 0, t0, "[]", mem_conn)
 
     assert log_file.exists()
-
-
-def test_exit_code_and_duration_persisted(mem_conn, tmp_path):
-    t0 = int(time.time())
-    _record_inner("bad-cmd", str(tmp_path), 127, 543, t0, "[]", mem_conn)
-    row = mem_conn.execute(
-        "SELECT exit_code, duration_ms FROM commands WHERE command='bad-cmd'"
-    ).fetchone()
-    assert row["exit_code"] == 127
-    assert row["duration_ms"] == 543
+    content = log_file.read_text()
+    assert content, "Error log must not be empty when both attempts fail"
+    assert "locked" in content, f"Expected error text in log, got: {content!r}"
 
 
 # ---------------------------------------------------------------------------

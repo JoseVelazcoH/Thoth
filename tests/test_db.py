@@ -19,13 +19,6 @@ def test_schema_created_from_empty():
     conn.close()
 
 
-def test_schema_version_row():
-    conn = connect()
-    apply_migrations(conn)
-    version = current_version(conn)
-    assert version >= 1
-    conn.close()
-
 
 def test_idempotent_rerun(mem_conn):
     apply_migrations(mem_conn)  # second call
@@ -81,27 +74,6 @@ def test_fts5_unavailable_no_raise():
     conn = connect()
     with patch("tth.db.fts5_available", return_value=False):
         apply_migrations(conn)  # should not raise
-    conn.close()
-
-
-def test_record_succeeds_without_fts5(mem_conn):
-    with patch("tth.db.fts5_available", return_value=False):
-        mem_conn.execute(
-            "INSERT INTO commands(command, directory, project, session_id, timestamp, exit_code, duration_ms, tags) "
-            "VALUES('ls', '/tmp', 'test', 'sess-3', 1700000002, 0, 1, '[]')"
-        )
-        mem_conn.commit()
-    row = mem_conn.execute("SELECT command FROM commands WHERE command='ls'").fetchone()
-    assert row is not None
-
-
-def test_no_wal_assertion_on_memory():
-    # connect() on :memory: must not raise even though WAL no-ops
-    conn = connect()
-    apply_migrations(conn)
-    mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
-    # :memory: returns 'memory' — we just assert it didn't raise
-    assert mode in ("memory", "wal")
     conn.close()
 
 

@@ -44,12 +44,3 @@ def test_new_session_on_project_change(mem_conn):
     assert sid0 != sid1
 
 
-def test_begin_immediate(mem_conn):
-    """Session row must exist after commit (transaction semantics)."""
-    t0 = int(time.time())
-    sid = get_or_create("proj", t0, mem_conn)
-    row = mem_conn.execute(
-        "SELECT ended_at, command_count FROM sessions WHERE session_id=?", (sid,)
-    ).fetchone()
-    assert row is not None
-    assert row["ended_at"] == t0

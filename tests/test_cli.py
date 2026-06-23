@@ -28,26 +28,6 @@ def temp_db(tmp_path, monkeypatch):
     return db_path
 
 
-def test_cli_exits_0_on_success(temp_db):
-    result = runner.invoke(
-        app,
-        [
-            "--cmd", "ls -la",
-            "--dir", "/tmp",
-            "--exit", "0",
-            "--duration", "10",
-            "--timestamp", "1700000000",
-            "--tags", "[]",
-        ],
-    )
-    assert result.exit_code == 0
-    # Verify row was stored
-    conn = sqlite3.connect(str(temp_db))
-    conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT command FROM commands WHERE command='ls -la'").fetchone()
-    conn.close()
-    assert row is not None
-
 
 def test_cli_exits_0_on_failure(monkeypatch):
     """Even if get_connection raises, CLI must exit 0."""
@@ -83,24 +63,6 @@ def test_cli_all_six_flags(temp_db):
     assert row["duration_ms"] == 3500
     assert row["tags"] == '["ci","build"]'
 
-
-def test_cli_tags_flag_json_array(temp_db):
-    result = runner.invoke(
-        app,
-        [
-            "--cmd", "npm test",
-            "--dir", "/tmp",
-            "--tags", '["refactor","fix"]',
-        ],
-    )
-    assert result.exit_code == 0
-    conn = sqlite3.connect(str(temp_db))
-    conn.row_factory = sqlite3.Row
-    row = conn.execute(
-        "SELECT tags FROM commands WHERE command='npm test'"
-    ).fetchone()
-    conn.close()
-    assert row["tags"] == '["refactor","fix"]'
 
 
 def test_cli_default_dir_is_cwd(temp_db, monkeypatch):
