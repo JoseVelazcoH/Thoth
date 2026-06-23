@@ -32,6 +32,89 @@ def infer_project(cwd: str, conn: sqlite3.Connection) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Internal: file parsers (shared load-and-dig helper)
+# ---------------------------------------------------------------------------
+
+
+def _read_nested(data: dict, *keys: str) -> str | None:
+    """Walk a chain of dict keys; return the string value or None."""
+    node = data
+    for key in keys:
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+    return node if isinstance(node, str) and node else None
+
+
+def _load_toml(p: Path) -> dict | None:
+    """Parse a TOML file; return the data dict or None on any error."""
+    try:
+        return tomllib.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _load_json(p: Path) -> dict | None:
+    """Parse a JSON file; return the data dict or None on any error."""
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _extract_pyproject(p: Path) -> str | None:
+    data = _load_toml(p)
+    if data is None:
+        return None
+    return _read_nested(data, "project", "name") or _read_nested(data, "tool", "poetry", "name")
+
+
+def _extract_package_json(p: Path) -> str | None:
+    data = _load_json(p)
+    return _read_nested(data, "name") if data is not None else None
+
+
+def _extract_cargo(p: Path) -> str | None:
+    data = _load_toml(p)
+    return _read_nested(data, "package", "name") if data is not None else None
+
+
+def _extract_gomod(p: Path) -> str | None:
+    try:
+        for line in p.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("module "):
+                module_path = line[len("module "):].strip()
+                return module_path.rstrip("/").split("/")[-1] or None
+        return None
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Marker strategy table (priority order)
+# ---------------------------------------------------------------------------
+# Each entry is (filename, extractor) where extractor receives the full Path
+# to the marker file and returns a project name string or None.
+# Directory-name markers use a lambda that ignores the file path and returns
+# the containing directory's name instead.
+
+_MARKER_STRATEGIES: list[tuple[str, object]] = [
+    (".git", lambda p: p.parent.name),          # directory marker: use is_dir() check below
+    ("package.json", _extract_package_json),
+    ("pyproject.toml", _extract_pyproject),
+    ("Cargo.toml", _extract_cargo),
+    ("go.mod", _extract_gomod),
+    ("docker-compose.yml", lambda p: p.parent.name),
+    ("compose.yml", lambda p: p.parent.name),
+]
+
+# Filenames that must exist as directories, not regular files.
+_DIR_MARKERS = {".git"}
+
+
+# ---------------------------------------------------------------------------
 # Internal: marker walk
 # ---------------------------------------------------------------------------
 
@@ -52,85 +135,24 @@ def _walk_markers(cwd: str) -> str:
 
 def _check_markers(directory: Path) -> str | None:
     """Check a single directory for project markers in priority order."""
-    # 1. .git directory
-    if (directory / ".git").is_dir():
-        return directory.name
-
-    # 2. package.json
-    pkg = directory / "package.json"
-    if pkg.exists():
-        name = _parse_package_json(pkg)
-        if name:
-            return name
-
-    # 3. pyproject.toml
-    pyproj = directory / "pyproject.toml"
-    if pyproj.exists():
-        name = _parse_pyproject(pyproj)
-        if name:
-            return name
-
-    # 4. Cargo.toml
-    cargo = directory / "Cargo.toml"
-    if cargo.exists():
-        name = _parse_cargo(cargo)
-        if name:
-            return name
-
-    # 5. go.mod
-    gomod = directory / "go.mod"
-    if gomod.exists():
-        name = _parse_gomod(gomod)
-        if name:
-            return name
-
-    # 6. docker-compose.yml / compose.yml
-    for compose_name in ("docker-compose.yml", "compose.yml"):
-        if (directory / compose_name).exists():
-            return directory.name
-
+    for filename, extractor in _MARKER_STRATEGIES:
+        candidate = directory / filename
+        if filename in _DIR_MARKERS:
+            if candidate.is_dir():
+                return extractor(candidate)
+        else:
+            if candidate.exists():
+                name = extractor(candidate)
+                if name:
+                    return name
     return None
 
 
 # ---------------------------------------------------------------------------
-# File parsers
+# Legacy parser names kept as thin aliases (for any external callers)
 # ---------------------------------------------------------------------------
 
-
-def _parse_pyproject(p: Path) -> str | None:
-    try:
-        data = tomllib.loads(p.read_text(encoding="utf-8"))
-        name = data.get("project", {}).get("name")
-        if name:
-            return name
-        return data.get("tool", {}).get("poetry", {}).get("name")
-    except Exception:
-        return None
-
-
-def _parse_package_json(p: Path) -> str | None:
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        return data.get("name") or None
-    except Exception:
-        return None
-
-
-def _parse_cargo(p: Path) -> str | None:
-    try:
-        data = tomllib.loads(p.read_text(encoding="utf-8"))
-        return data.get("package", {}).get("name") or None
-    except Exception:
-        return None
-
-
-def _parse_gomod(p: Path) -> str | None:
-    try:
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line.startswith("module "):
-                module_path = line[len("module "):].strip()
-                return module_path.rstrip("/").split("/")[-1] or None
-        return None
-    except Exception:
-        return None
+_parse_pyproject = _extract_pyproject
+_parse_package_json = _extract_package_json
+_parse_cargo = _extract_cargo
+_parse_gomod = _extract_gomod
