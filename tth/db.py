@@ -2,6 +2,7 @@
 
 import logging
 import sqlite3
+import time
 from pathlib import Path
 
 from tth.constants import BUSY_TIMEOUT_MS
@@ -175,8 +176,6 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
     Instead, we split the SQL on semicolons and execute each statement
     individually within a manually managed transaction.
     """
-    import time
-
     ver = current_version(conn)
 
     for version, sql in MIGRATIONS:
@@ -196,13 +195,7 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
             conn.commit()
             continue
 
-        # Split the SQL block into individual top-level statements.
-        # sqlite3.execute() only accepts a single statement, so we drive them
-        # one at a time inside a single explicit BEGIN IMMEDIATE … COMMIT.
-        #
-        # We cannot split naively on ";" because CREATE TRIGGER bodies contain
-        # their own ";" separators inside BEGIN…END blocks.  We track nesting
-        # depth and only split on ";" when depth == 0.
+        # Split the SQL block via _split_sql (see its docstring for rationale).
         statements = _split_sql(sql)
 
         conn.execute("BEGIN IMMEDIATE")
