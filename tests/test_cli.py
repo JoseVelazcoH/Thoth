@@ -65,9 +65,9 @@ def test_cli_all_six_flags(temp_db):
 
 
 
-def test_cli_default_dir_is_cwd(temp_db, monkeypatch):
-    """Omitting --dir should store os.getcwd() as directory."""
-    monkeypatch.chdir("/tmp")
+def test_cli_default_dir_is_cwd(temp_db, monkeypatch, tmp_path):
+    """Omitting --dir should store the real cwd as directory (hermetic, no /tmp)."""
+    monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["--cmd", "pwd"])
     assert result.exit_code == 0
     conn = sqlite3.connect(str(temp_db))
@@ -77,9 +77,7 @@ def test_cli_default_dir_is_cwd(temp_db, monkeypatch):
     ).fetchone()
     conn.close()
     assert row is not None
-    # The stored directory must equal /tmp exactly (or its realpath resolution).
-    # Asserting only "is not None" would miss a wrong-path bug.
-    expected = os.path.realpath("/tmp")
+    expected = os.path.realpath(str(tmp_path))
     assert row["directory"] == expected, (
         f"Expected directory '{expected}', got '{row['directory']}'"
     )

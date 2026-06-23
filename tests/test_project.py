@@ -127,13 +127,33 @@ def test_cache_miss_stale(mem_conn, tmp_path):
     assert result == "fresh-name"
 
 
-def test_command_count_not_reset_on_refresh(mem_conn, tmp_path):
-    """A stale-cache refresh must never reset command_count to 0 or 1.
-
-    The recorder's upsert uses command_count=command_count+1, so after a
-    re-walk the count must be >= the count before the refresh, never reset.
-    """
+def test_stale_cache_triggers_rewalk(mem_conn, tmp_path):
+    """A stale cache entry (>24h) must cause infer_project to re-walk the filesystem."""
     import time
+
+    from tth.project import infer_project
+
+    project_dir = tmp_path / "rewalk-app"
+    project_dir.mkdir()
+    (project_dir / "pyproject.toml").write_text('[project]\nname = "rewalk-app"\n')
+
+    now = int(time.time())
+    stale_time = now - (25 * 3600)
+
+    mem_conn.execute(
+        "INSERT INTO projects(path, name, last_seen, command_count) VALUES(?, ?, ?, ?)",
+        (str(project_dir), "old-name", stale_time, 0),
+    )
+    mem_conn.commit()
+
+    result = infer_project(str(project_dir), mem_conn)
+    assert result == "rewalk-app", f"Expected 'rewalk-app' from re-walk, got '{result}'"
+
+
+def test_recorder_upsert_increments_command_count(mem_conn, tmp_path):
+    """The recorder upsert must increment command_count and never reset it."""
+    import time
+
     from tth.recorder import _record_inner
 
     project_dir = tmp_path / "counted-app"
@@ -143,14 +163,12 @@ def test_command_count_not_reset_on_refresh(mem_conn, tmp_path):
     now = int(time.time())
     stale_time = now - (25 * 3600)
 
-    # Seed project with command_count=5 and a stale last_seen
     mem_conn.execute(
         "INSERT INTO projects(path, name, last_seen, command_count) VALUES(?, ?, ?, ?)",
         (str(project_dir), "counted-app", stale_time, 5),
     )
     mem_conn.commit()
 
-    # Trigger a record which exercises infer_project (cache miss → re-walk) + the upsert
     _record_inner(
         command="ls",
         directory=str(project_dir),
@@ -166,7 +184,6 @@ def test_command_count_not_reset_on_refresh(mem_conn, tmp_path):
     ).fetchone()
     assert row is not None
     count = row[0]
-    # Must be incremented (was 5, +1 = 6), never reset to 0 or 1
     assert count >= 6, f"command_count was reset to {count}; expected >= 6"
 
 
