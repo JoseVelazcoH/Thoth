@@ -93,20 +93,11 @@ def record(
     try:
         _record_inner(command, directory, exit_code, duration_ms, timestamp, tags_json, conn)
     except sqlite3.OperationalError:
-        # Roll back any dirty transaction left by the failed attempt before
-        # retrying.  Without this, _record_inner's get_or_create() would issue
-        # BEGIN IMMEDIATE inside the still-open transaction and raise "cannot
-        # start a transaction within a transaction".
-        # NOTE: session atomicity gap — get_or_create() commits the session row
-        # independently before the command INSERT; if the command INSERT fails
-        # the session row persists as an orphan.  Fixing this requires wrapping
-        # the entire _record_inner in a single explicit transaction.  Left as a
-        # documented follow-up.
+        # Rollback the dirty transaction before retrying; orphan session rows are a known follow-up.
         try:
             conn.rollback()
         except Exception:
             pass  # guard: rollback must not escape
-        # Retry once on lock
         try:
             _record_inner(command, directory, exit_code, duration_ms, timestamp, tags_json, conn)
         except Exception as exc2:

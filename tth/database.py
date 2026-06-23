@@ -115,24 +115,8 @@ def fts5_available(conn: sqlite3.Connection) -> bool:
 def _split_sql(sql: str) -> list[str]:
     """Split a SQL script into individual top-level statements.
 
-    Uses ``sqlite3.complete_statement()`` from the stdlib, which correctly
-    tracks string-literal quote state, comment boundaries, and BEGIN…END
-    trigger-body nesting.  This replaces the old hand-rolled depth-counter
-    that had three latent bugs:
-
-    1. Any ``END`` keyword (including ``CASE…END``) decremented the depth
-       counter, which could prematurely close a trigger body.
-    2. ``BEGIN``/``;``/``END`` inside string literals were treated as
-       structural tokens, not literal text.
-    3. ``line.split("--")[0]`` stripped content after ``--`` even when it
-       appeared inside a string literal.
-
-    Algorithm: accumulate input lines into a buffer one line at a time.
-    Whenever ``sqlite3.complete_statement(buffer)`` returns ``True``, the
-    buffer contains exactly one complete statement — strip it, keep it if
-    non-empty (skip whitespace-only leftovers), and reset the buffer.
-    After the loop, anything left in the buffer is a trailing statement
-    without a final semicolon.
+    Uses ``sqlite3.complete_statement()`` to correctly handle quoted strings,
+    comments, and BEGIN...END trigger bodies.
     """
     statements: list[str] = []
     buf = ""
