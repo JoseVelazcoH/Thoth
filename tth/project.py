@@ -6,9 +6,8 @@ import time
 import tomllib
 from pathlib import Path
 
-
-_MAX_WALK_DEPTH = 20
-_CACHE_TTL_SECONDS = 86400  # 24 hours
+from tth.constants import CACHE_TTL_SECONDS as _CACHE_TTL_SECONDS
+from tth.constants import MAX_WALK_DEPTH as _MAX_WALK_DEPTH
 
 
 # ---------------------------------------------------------------------------

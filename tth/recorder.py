@@ -5,17 +5,14 @@ import os
 import sqlite3
 import time
 import traceback
-from pathlib import Path
-
 import typer
 
+from tth.constants import ERROR_LOG
 from tth.db import get_connection
 from tth.project import infer_project
 from tth.session import get_or_create
 
 app = typer.Typer()
-
-ERROR_LOG = Path("~/.local/share/thoth/error.log").expanduser()
 
 
 # ---------------------------------------------------------------------------

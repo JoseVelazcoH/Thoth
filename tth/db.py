@@ -4,9 +4,10 @@ import logging
 import sqlite3
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from tth.constants import BUSY_TIMEOUT_MS
+from tth.constants import DEFAULT_DB_PATH
 
-DEFAULT_DB_PATH = Path("~/.local/share/thoth/history.db").expanduser()
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Schema SQL
@@ -90,7 +91,7 @@ def get_connection(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=2000")
+    conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
     conn.execute("PRAGMA synchronous=NORMAL")
     apply_migrations(conn)
     return conn
