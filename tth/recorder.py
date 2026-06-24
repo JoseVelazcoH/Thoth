@@ -1,16 +1,14 @@
-"""Recorder: core record() function and tth record CLI command."""
+"""Recorder: core record() function and error logging."""
 
 import json
 import os
 import sqlite3
-import time
 import traceback
-import typer
 from pathlib import Path
 
-from tth.database import get_connection
 from tth.project import infer_project
 from tth.session import get_or_create
+
 
 def _resolve_error_log() -> Path:
     """Return error log path honoring THOTH_ERROR_LOG > XDG_DATA_HOME > default."""
@@ -26,9 +24,6 @@ def _resolve_error_log() -> Path:
 # Module-level reference kept so tests can monkeypatch it directly.
 ERROR_LOG = _resolve_error_log()
 
-app = typer.Typer()
-
-
 
 def _normalize_tags(tags_json) -> str:
     """Return tags as a JSON array string. Normalize invalid/empty to '[]'."""
@@ -41,7 +36,6 @@ def _normalize_tags(tags_json) -> str:
         return tags_json  # preserve the user-supplied JSON verbatim: do not re-serialize
     except (json.JSONDecodeError, TypeError, ValueError):
         return "[]"
-
 
 
 def _record_inner(
@@ -126,33 +120,3 @@ def record(
             _log_error(exc2)
     except Exception as exc:
         _log_error(exc)
-
-
-
-@app.command()
-def record_cmd(
-    cmd: str = typer.Option(..., "--cmd", help="The shell command that was executed"),
-    dir_: str = typer.Option(None, "--dir", help="Working directory (default: cwd)"),
-    exit_: int = typer.Option(0, "--exit", help="Exit code of the command"),
-    duration: int = typer.Option(0, "--duration", help="Duration in milliseconds"),
-    timestamp: int = typer.Option(None, "--timestamp", help="Unix timestamp (default: now)"),
-    tags: str = typer.Option("[]", "--tags", help="JSON array of tags"),
-) -> None:
-    """Record a shell command into Thoth's history database."""
-    conn = None
-    try:
-        if dir_ is None:
-            dir_ = os.getcwd()
-        if timestamp is None:
-            timestamp = int(time.time())
-        conn = get_connection()
-        record(cmd, dir_, exit_, duration, timestamp, tags, conn)
-    except Exception as exc:
-        _log_error(exc)
-    finally:
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-    raise typer.Exit(0)

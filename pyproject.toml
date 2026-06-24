@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-tth = "tth.recorder:app"
+tth = "tth.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["tth"]
