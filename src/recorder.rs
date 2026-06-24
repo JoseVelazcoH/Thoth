@@ -253,15 +253,37 @@ mod tests {
     #[test]
     fn record_never_propagates_error() {
         let dir = TempDir::new().unwrap();
+        let log_path = dir.path().join("error.log");
+        crate::logging::setup(log_path.clone());
+
         let mut conn = disk_conn(&dir);
-        let bad_args = RecordArgs {
-            cmd: String::from("cmd"),
-            dir: Some(String::from("/tmp")),
-            exit_code: 0,
-            duration: 0,
-            timestamp: Some(1700000000),
-            tags: String::from("not valid json"),
-        };
-        record(&bad_args, &mut conn);
+        conn.execute_batch("DROP TABLE commands;").unwrap();
+
+        let args = base_args();
+        record(&args, &mut conn);
+
+        let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+        assert!(!log.is_empty(), "error was not logged");
+    }
+
+    #[test]
+    fn double_failure_no_row_no_panic() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("locked.db");
+        let mut conn = crate::database::get_connection(Some(&db_path)).unwrap();
+
+        let blocker = Connection::open(&db_path).unwrap();
+        blocker.execute_batch("PRAGMA busy_timeout=0;").unwrap();
+        blocker.execute("BEGIN IMMEDIATE", []).unwrap();
+
+        let args = base_args();
+        record(&args, &mut conn);
+
+        drop(blocker);
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "no row should have been inserted on double failure");
     }
 }
