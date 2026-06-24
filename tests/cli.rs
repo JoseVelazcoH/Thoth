@@ -95,6 +95,68 @@ fn cli_all_six_flags_persisted() {
 }
 
 #[test]
+fn cli_terminal_id_persisted() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("history.db");
+    tth()
+        .env("THOTH_DB", db_path.to_str().unwrap())
+        .env(
+            "THOTH_ERROR_LOG",
+            dir.path().join("error.log").to_str().unwrap(),
+        )
+        .args([
+            "record",
+            "--cmd",
+            "test-cmd",
+            "--exit",
+            "0",
+            "--duration",
+            "1",
+            "--timestamp",
+            "1700000000",
+            "--terminal-id",
+            "term-abc",
+        ])
+        .assert()
+        .code(0);
+
+    let conn = Connection::open(&db_path).unwrap();
+    let terminal_id: Option<String> = conn
+        .query_row(
+            "SELECT terminal_id FROM commands WHERE command='test-cmd'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(terminal_id, Some(String::from("term-abc")));
+}
+
+#[test]
+fn cli_terminal_id_null_when_omitted() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("history.db");
+    tth()
+        .env("THOTH_DB", db_path.to_str().unwrap())
+        .env(
+            "THOTH_ERROR_LOG",
+            dir.path().join("error.log").to_str().unwrap(),
+        )
+        .args(["record", "--cmd", "no-tid-cmd", "--exit", "0"])
+        .assert()
+        .code(0);
+
+    let conn = Connection::open(&db_path).unwrap();
+    let terminal_id: Option<String> = conn
+        .query_row(
+            "SELECT terminal_id FROM commands WHERE command='no-tid-cmd'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(terminal_id.is_none());
+}
+
+#[test]
 fn cli_default_dir_is_cwd() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("history.db");

@@ -26,6 +26,8 @@ pub struct RecordArgs {
     pub timestamp: Option<i64>,
     #[arg(long, default_value = "[]")]
     pub tags: String,
+    #[arg(long = "terminal-id")]
+    pub terminal_id: Option<String>,
 }
 
 pub fn run() -> Result<(), crate::error::ThothError> {
@@ -69,6 +71,7 @@ mod tests {
             duration: 0,
             timestamp: None,
             tags: String::from("[]"),
+            terminal_id: None,
         };
         assert_eq!(args.tags, "[]");
     }
