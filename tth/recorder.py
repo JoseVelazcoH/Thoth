@@ -41,32 +41,42 @@ def _record_inner(
     tags_json: str,
     conn: sqlite3.Connection,
 ) -> None:
-    """Insert a command row and update related session/project state."""
+    """Insert a command row and update session/project state in one transaction.
+
+    All writes (session upsert, command insert, project upsert, session update)
+    are wrapped in a single BEGIN IMMEDIATE / COMMIT so a mid-flight failure
+    rolls back everything atomically.
+    """
     tags = _normalize_tags(tags_json)
-    project = infer_project(directory, conn)
-    sid = get_or_create(project, timestamp, conn)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        project = infer_project(directory, conn)
+        sid = get_or_create(project, timestamp, conn)
 
-    conn.execute(
-        "INSERT INTO commands(command, directory, project, session_id, timestamp, exit_code, duration_ms, tags) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-        (command, directory, project, sid, timestamp, exit_code, duration_ms, tags),
-    )
+        conn.execute(
+            "INSERT INTO commands(command, directory, project, session_id, timestamp, exit_code, duration_ms, tags) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            (command, directory, project, sid, timestamp, exit_code, duration_ms, tags),
+        )
 
-    # Upsert project: refresh name/last_seen, increment command_count (never reset)
-    conn.execute(
-        "INSERT INTO projects(path, name, last_seen, command_count) VALUES(?, ?, ?, 1) "
-        "ON CONFLICT(path) DO UPDATE SET "
-        "name=excluded.name, last_seen=excluded.last_seen, command_count=command_count + 1",
-        (directory, project, timestamp),
-    )
+        # Upsert project: refresh name/last_seen, increment command_count (never reset)
+        conn.execute(
+            "INSERT INTO projects(path, name, last_seen, command_count) VALUES(?, ?, ?, 1) "
+            "ON CONFLICT(path) DO UPDATE SET "
+            "name=excluded.name, last_seen=excluded.last_seen, command_count=command_count + 1",
+            (directory, project, timestamp),
+        )
 
-    # Update session: bump ended_at and command_count
-    conn.execute(
-        "UPDATE sessions SET ended_at=?, command_count=command_count + 1 WHERE session_id=?",
-        (timestamp, sid),
-    )
+        # Update session: bump ended_at and command_count
+        conn.execute(
+            "UPDATE sessions SET ended_at=?, command_count=command_count + 1 WHERE session_id=?",
+            (timestamp, sid),
+        )
 
-    conn.commit()
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def _log_error(exc: Exception) -> None:
@@ -93,7 +103,7 @@ def record(
     try:
         _record_inner(command, directory, exit_code, duration_ms, timestamp, tags_json, conn)
     except sqlite3.OperationalError:
-        # Rollback the dirty transaction before retrying; orphan session rows are a known follow-up.
+        # Rollback before retrying; the single-transaction design ensures no orphan rows.
         try:
             conn.rollback()
         except Exception:

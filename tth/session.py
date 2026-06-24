@@ -11,15 +11,9 @@ _GAP_SECONDS = SESSION_GAP_MINUTES * 60
 def get_or_create(project: str, timestamp: int, conn: sqlite3.Connection) -> str:
     """Return existing session_id or create a new one.
 
-    Rules (evaluated inside BEGIN IMMEDIATE):
-    - New session if: no prior session, gap > 30 min, or project differs.
-    - Reuse session if: gap <= 30 min AND project matches.
+    Transaction-agnostic: caller must own the surrounding transaction.
+    Rules: new session if no prior session, gap > 30 min, or project differs.
     """
-    try:
-        conn.execute("BEGIN IMMEDIATE")
-    except sqlite3.OperationalError:
-        pass  # already in a transaction
-
     row = conn.execute(
         "SELECT session_id, project, ended_at FROM sessions ORDER BY ended_at DESC LIMIT 1"
     ).fetchone()
@@ -44,5 +38,4 @@ def get_or_create(project: str, timestamp: int, conn: sqlite3.Connection) -> str
             (timestamp, sid),
         )
 
-    conn.commit()
     return sid

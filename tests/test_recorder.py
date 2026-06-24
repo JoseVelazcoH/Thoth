@@ -162,3 +162,82 @@ def test_retry_runs_on_clean_transaction(mem_conn, tmp_path):
 
     # (c) call_count == 2 confirms the retry ran
     assert call_count == 2, f"Expected 2 calls (original + retry), got {call_count}"
+
+
+class _FailOnCommandInsert:
+    """Wrapper that raises on the commands INSERT but delegates everything else."""
+
+    def __init__(self, real_conn, *, fail_count=1):
+        self._conn = real_conn
+        self._fail_count = fail_count
+        self._calls = 0
+
+    def execute(self, sql, params=()):
+        if sql.strip().upper().startswith("INSERT INTO COMMANDS"):
+            self._calls += 1
+            if self._calls <= self._fail_count:
+                raise sqlite3.OperationalError("simulated command insert failure")
+        return self._conn.execute(sql, params)
+
+    def commit(self):
+        return self._conn.commit()
+
+    def rollback(self):
+        return self._conn.rollback()
+
+    def close(self):
+        return self._conn.close()
+
+    # Forward attribute access for row_factory etc.
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+def test_atomicity_command_failure_leaves_no_session(mem_conn, tmp_path):
+    """If the command INSERT fails, _record_inner rolls back the whole transaction.
+
+    No orphan session row must survive; the post-rollback state must be clean.
+    """
+    t0 = int(time.time())
+    failing_conn = _FailOnCommandInsert(mem_conn, fail_count=1)
+
+    try:
+        _record_inner("atomicity-test", str(tmp_path), 0, 0, t0, "[]", failing_conn)
+    except Exception:
+        pass  # expected to raise; we check DB state next
+
+    sessions = mem_conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+    commands = mem_conn.execute(
+        "SELECT COUNT(*) FROM commands WHERE command='atomicity-test'"
+    ).fetchone()[0]
+    assert sessions == 0, f"Orphan session found after rollback (got {sessions})"
+    assert commands == 0, f"Orphan command found after rollback (got {commands})"
+
+
+def test_atomicity_retry_produces_exactly_one_row(mem_conn, tmp_path, tmp_path_factory):
+    """After a failed first attempt, record()'s retry produces exactly 1 session + 1 command."""
+    log_dir = tmp_path_factory.mktemp("atom_logs")
+    log_file = log_dir / "error.log"
+    t0 = int(time.time())
+
+    call_count = 0
+    original = _record_inner
+
+    def _fail_once(command, directory, exit_code, duration_ms, timestamp, tags_json, conn):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise sqlite3.OperationalError("simulated lock")
+        original(command, directory, exit_code, duration_ms, timestamp, tags_json, conn)
+
+    with patch("tth.recorder._record_inner", side_effect=_fail_once):
+        with patch("tth.recorder.ERROR_LOG", log_file):
+            record("retry-atomicity", str(tmp_path), 0, 0, t0, "[]", mem_conn)
+
+    sessions = mem_conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+    commands = mem_conn.execute(
+        "SELECT COUNT(*) FROM commands WHERE command='retry-atomicity'"
+    ).fetchone()[0]
+    assert sessions == 1, f"Expected 1 session after retry, got {sessions}"
+    assert commands == 1, f"Expected 1 command after retry, got {commands}"
+    assert call_count == 2, f"Expected 2 calls, got {call_count}"
