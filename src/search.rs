@@ -607,15 +607,20 @@ mod tests {
     }
 
     #[test]
-    fn build_query_fts_hyphenated_token() {
+    fn build_query_fts_hyphenated_token_integration() {
+        let conn = mem_conn();
+        if !crate::database::fts5_available(&conn) {
+            return;
+        }
+        seed(&conn, s("docker-compose up", "p", 1_000, 0, 100, "[]", "s1"));
+        seed(&conn, s("ls -la", "p", 2_000, 0, 100, "[]", "s1"));
         let args = SearchArgs {
-            query: Some("zig-zag".into()),
+            query: Some("docker-compose".into()),
             ..default_args()
         };
-        let (_sql, params) = build_query(&args, FIXED_NOW).unwrap();
-        let p0 = format!("{:?}", "\"zig-zag\"");
-        assert!(p0.contains("zig-zag"));
-        assert_eq!(params.len(), 2);
+        let rows = execute(&args, &conn, FIXED_NOW).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].command, "docker-compose up");
     }
 
     #[test]
