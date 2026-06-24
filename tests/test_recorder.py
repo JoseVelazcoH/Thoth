@@ -123,6 +123,19 @@ def test_normalize_tags_none():
     assert _normalize_tags(None) == "[]"  # type: ignore[arg-type]
 
 
+def test_normalize_tags_integer_elements_rejected():
+    assert _normalize_tags("[1, 2]") == "[]"
+
+
+def test_normalize_tags_nested_element_rejected():
+    assert _normalize_tags('["a", {"b": 1}]') == "[]"
+
+
+def test_normalize_tags_valid_strings_preserved_verbatim():
+    raw = '["a","b"]'
+    assert _normalize_tags(raw) == raw
+
+
 def test_retry_runs_on_clean_transaction(mem_conn, tmp_path):
     """record() must rollback before retrying so the second attempt starts
     on a clean connection — not inside the dirty transaction left by the

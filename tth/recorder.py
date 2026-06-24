@@ -31,7 +31,7 @@ def _normalize_tags(tags_json) -> str:
         return "[]"
     try:
         parsed = json.loads(tags_json)
-        if not isinstance(parsed, list):
+        if not isinstance(parsed, list) or not all(isinstance(e, str) for e in parsed):
             return "[]"
         return tags_json  # preserve the user-supplied JSON verbatim: do not re-serialize
     except (json.JSONDecodeError, TypeError, ValueError):
