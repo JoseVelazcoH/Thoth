@@ -71,17 +71,21 @@ STUB
     bash --norc --noprofile -c "
         export STUB_LOG='$stub_log'
         source '${REPO_ROOT}/shells/thoth.bash' 2>/dev/null || true
-        true
+        _THOTH_CMD='echo hello'
+        _THOTH_START=\$EPOCHREALTIME
+        _thoth_precmd
+        wait
     " || true
 
-    if grep -q 'record' "$stub_log" 2>/dev/null; then
-        if grep -q -- '--terminal-id' "$stub_log"; then
-            _pass "bash: record call includes --terminal-id"
-        else
-            _skip "bash: record called but --terminal-id not seen (non-interactive)"
+    local all_ok=1
+    for flag in --cmd --dir --exit --duration --timestamp --tags --terminal-id; do
+        if ! grep -q -- "$flag" "$stub_log" 2>/dev/null; then
+            _fail "bash: record invocation missing flag $flag"
+            all_ok=0
         fi
-    else
-        _pass "bash: hook sourced in non-interactive shell (record fires after real commands)"
+    done
+    if [[ $all_ok -eq 1 ]]; then
+        _pass "bash: _thoth_precmd passes all 7 flags to tth record"
     fi
 }
 
