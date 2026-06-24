@@ -323,6 +323,7 @@ fn render_by_session(rows: &[CommandRow]) -> String {
         i += 1;
     }
 
+    output.push_str(&format!("{} result(s)\n", rows.len()));
     output
 }
 
@@ -928,15 +929,15 @@ mod tests {
     }
 
     #[test]
-    fn render_show_session_contains_separator() {
+    fn render_show_session_reduced_columns_two_sessions() {
         let rows = vec![
             CommandRow {
                 timestamp: 1_700_000_000,
                 project: "alpha".into(),
-                tags: "[]".into(),
+                tags: r#"["rust"]"#.into(),
                 exit_code: 0,
                 duration_ms: 100,
-                directory: "/tmp".into(),
+                directory: "/home/user/alpha".into(),
                 command: "cmd_a".into(),
                 session_id: "session-aaa".into(),
             },
@@ -946,7 +947,7 @@ mod tests {
                 tags: "[]".into(),
                 exit_code: 0,
                 duration_ms: 200,
-                directory: "/tmp".into(),
+                directory: "/home/user/alpha".into(),
                 command: "cmd_b".into(),
                 session_id: "session-aaa".into(),
             },
@@ -956,17 +957,46 @@ mod tests {
                 tags: "[]".into(),
                 exit_code: 1,
                 duration_ms: 500,
-                directory: "/tmp".into(),
+                directory: "/home/user/beta".into(),
                 command: "cmd_c".into(),
                 session_id: "session-bbb".into(),
             },
         ];
         let out = render(&rows, true);
-        assert!(out.contains("---"));
-        assert!(out.contains("session-"));
+        let headers_count = out.matches("---").count();
+        assert!(headers_count >= 2, "expected two session header lines");
+        let header_lines: Vec<&str> = out.lines().filter(|l| l.starts_with("---")).collect();
+        assert_eq!(
+            header_lines.len(),
+            2,
+            "expected exactly two session headers"
+        );
+        assert!(
+            header_lines[0].contains("alpha"),
+            "first header should include project alpha"
+        );
+        assert!(
+            header_lines[1].contains("beta"),
+            "second header should include project beta"
+        );
         assert!(out.contains("cmd_a"));
+        assert!(out.contains("cmd_b"));
         assert!(out.contains("cmd_c"));
-        assert!(!out.contains("project") || out.contains("session-a"));
+        assert!(out.contains("timestamp"));
+        assert!(out.contains("exit"));
+        assert!(out.contains("duration"));
+        assert!(out.contains("command"));
+        assert!(!out.contains("tags"));
+        assert!(!out.contains("directory"));
+        assert!(out.contains("3 result(s)"));
+        let sub_table_lines: Vec<&str> = out
+            .lines()
+            .filter(|l| !l.starts_with("---") && l.contains("project"))
+            .collect();
+        assert!(
+            sub_table_lines.is_empty(),
+            "project must not appear as a sub-table column header; offending lines: {sub_table_lines:?}"
+        );
     }
 
     #[test]
