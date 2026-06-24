@@ -1,12 +1,16 @@
 use crate::error::ThothError;
-use crate::schema::{SCHEMA_V1, SCHEMA_V2_FTS};
+use crate::schema::{SCHEMA_V1, SCHEMA_V2_FTS, SCHEMA_V3_TERMINAL_ID};
 use rusqlite::Connection;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const BUSY_TIMEOUT_MS: u32 = 2000;
 
-pub const MIGRATIONS: &[(i64, &str)] = &[(1, SCHEMA_V1), (2, SCHEMA_V2_FTS)];
+pub const MIGRATIONS: &[(i64, &str)] = &[
+    (1, SCHEMA_V1),
+    (2, SCHEMA_V2_FTS),
+    (3, SCHEMA_V3_TERMINAL_ID),
+];
 
 pub fn connect_memory() -> Result<Connection, ThothError> {
     let conn = Connection::open_in_memory()?;
@@ -83,6 +87,109 @@ mod tests {
         let mut c = connect_memory().unwrap();
         apply_migrations(&mut c).unwrap();
         c
+    }
+
+    #[test]
+    fn v3_terminal_id_column_exists() {
+        let conn = mem_conn();
+        let cols: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(commands)").unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        assert!(
+            cols.iter().any(|c| c == "terminal_id"),
+            "terminal_id column missing: {cols:?}"
+        );
+    }
+
+    #[test]
+    fn v3_pre_existing_rows_have_null_terminal_id() {
+        let mut conn = connect_memory().unwrap();
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(1, ?1)",
+            rusqlite::params![now],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO commands(command, directory, project, session_id, timestamp) VALUES('old-cmd', '/tmp', 'p', 's1', 1700000000)",
+            [],
+        ).unwrap();
+        apply_migrations(&mut conn).unwrap();
+        let terminal_id: Option<String> = conn
+            .query_row(
+                "SELECT terminal_id FROM commands WHERE command='old-cmd'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            terminal_id.is_none(),
+            "expected NULL terminal_id for pre-existing row"
+        );
+    }
+
+    #[test]
+    fn v3_migration_idempotent() {
+        let mut conn = mem_conn();
+        let ver_before = current_version(&conn);
+        assert_eq!(ver_before, 3);
+        apply_migrations(&mut conn).unwrap();
+        let ver_after = current_version(&conn);
+        assert_eq!(ver_after, 3);
+    }
+
+    #[test]
+    fn v3_current_version_is_3() {
+        let conn = mem_conn();
+        assert_eq!(current_version(&conn), 3);
+    }
+
+    #[test]
+    fn v3_fts_triggers_still_work_after_migration() {
+        let conn = mem_conn();
+        if !fts5_available(&conn) {
+            return;
+        }
+        conn.execute(
+            "INSERT INTO commands(command, directory, project, session_id, timestamp) VALUES('v3-fts-test', '/tmp', 'p', 's1', 1700000000)",
+            [],
+        ).unwrap();
+        let rowid: Option<i64> = conn
+            .query_row(
+                "SELECT rowid FROM commands_fts WHERE commands_fts MATCH '\"v3-fts-test\"'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+        assert!(rowid.is_some(), "FTS trigger broken after v3 migration");
+        let id: i64 = conn
+            .query_row(
+                "SELECT id FROM commands WHERE command='v3-fts-test'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        conn.execute("DELETE FROM commands WHERE id=?1", rusqlite::params![id])
+            .unwrap();
+        let after_delete: Option<i64> = conn
+            .query_row(
+                "SELECT rowid FROM commands_fts WHERE commands_fts MATCH '\"v3-fts-test\"'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+        assert!(
+            after_delete.is_none(),
+            "FTS delete trigger broken after v3 migration"
+        );
     }
 
     #[test]

@@ -42,8 +42,8 @@ pub fn record_inner(args: &RecordArgs, conn: &mut Connection) -> Result<(), Thot
     let sid = get_or_create(&project, timestamp, &tx)?;
 
     tx.execute(
-        "INSERT INTO commands(command, directory, project, session_id, timestamp, exit_code, duration_ms, tags) \
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO commands(command, directory, project, session_id, timestamp, exit_code, duration_ms, tags, terminal_id) \
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         rusqlite::params![
             args.cmd,
             directory,
@@ -52,7 +52,8 @@ pub fn record_inner(args: &RecordArgs, conn: &mut Connection) -> Result<(), Thot
             timestamp,
             args.exit_code,
             args.duration,
-            tags
+            tags,
+            args.terminal_id
         ],
     )?;
 
@@ -127,7 +128,41 @@ mod tests {
             duration: 5,
             timestamp: Some(1700000000),
             tags: String::from("[]"),
+            terminal_id: None,
         }
+    }
+
+    #[test]
+    fn terminal_id_persisted_when_provided() {
+        let mut conn = mem_conn();
+        let args = RecordArgs {
+            terminal_id: Some(String::from("abc")),
+            ..base_args()
+        };
+        record_inner(&args, &mut conn).unwrap();
+        let val: Option<String> = conn
+            .query_row(
+                "SELECT terminal_id FROM commands WHERE command='echo hi'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(val, Some(String::from("abc")));
+    }
+
+    #[test]
+    fn terminal_id_null_when_omitted() {
+        let mut conn = mem_conn();
+        let args = base_args();
+        record_inner(&args, &mut conn).unwrap();
+        let val: Option<String> = conn
+            .query_row(
+                "SELECT terminal_id FROM commands WHERE command='echo hi'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(val.is_none());
     }
 
     #[test]
@@ -185,6 +220,7 @@ mod tests {
             duration: 1,
             timestamp: Some(1700000000),
             tags: String::from("[]"),
+            terminal_id: None,
         };
         record_inner(&args, &mut conn).unwrap();
         let count: i64 = conn
