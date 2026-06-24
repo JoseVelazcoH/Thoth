@@ -162,6 +162,16 @@ _check_flags_in_file() {
     done
 }
 
+_run_epochseconds_check() {
+    local content
+    content="$(cat "${REPO_ROOT}/shells/thoth.bash")"
+    if [[ "$content" == *'$(date +%s)'* ]]; then
+        _fail "thoth.bash: uses \$(date +%s) subshell instead of \$EPOCHSECONDS"
+    else
+        _pass "thoth.bash: uses \$EPOCHSECONDS builtin (no date subshell)"
+    fi
+}
+
 _run_flag_check() {
     _check_flags_in_file "thoth.bash" "${REPO_ROOT}/shells/thoth.bash"
 }
@@ -211,6 +221,7 @@ echo "=== Thoth shell hook smoke tests ==="
 _run_bash_version_check
 _run_bash_syntax_check
 _run_zsh_syntax_check
+_run_epochseconds_check
 _run_flag_check
 _run_zsh_flag_check
 _run_bash_trap_chain_single_quote_test
