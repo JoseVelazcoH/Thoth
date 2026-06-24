@@ -11,7 +11,8 @@ import sys
 import time
 
 from tth.database import get_connection
-from tth.recorder import record, _log_error
+from tth.logging_config import setup as _setup_logging
+from tth.recorder import record, _log_error, _resolve_error_log
 
 
 def main(argv=None):
@@ -27,6 +28,8 @@ def main(argv=None):
     rec.add_argument("--tags", default="[]", help="JSON array of tags")
 
     args = parser.parse_args(argv)
+
+    _setup_logging(_resolve_error_log())
 
     if args.command == "record":
         conn = None
