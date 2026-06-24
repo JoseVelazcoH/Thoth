@@ -168,19 +168,6 @@ mod tests {
     }
 
     #[test]
-    fn default_dir_is_cwd() {
-        let cwd = std::env::current_dir()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let dir = std::env::current_dir()
-            .ok()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-        assert_eq!(dir, cwd);
-    }
-
-    #[test]
     fn default_timestamp_is_now() {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

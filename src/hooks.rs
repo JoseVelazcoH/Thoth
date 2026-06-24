@@ -61,7 +61,13 @@ pub fn has_block(content: &str) -> bool {
 pub fn insert_or_replace_block(rc_contents: &str, hook_body_str: &str) -> String {
     let block = format!("{}\n{}\n{}", SENTINEL_BEGIN, hook_body_str, SENTINEL_END);
     if has_block(rc_contents) {
-        remove_block(rc_contents) + "\n" + &block
+        let stripped = remove_block(rc_contents);
+        let prefix = stripped.trim_end_matches('\n');
+        if prefix.is_empty() {
+            block
+        } else {
+            format!("{}\n{}", prefix, block)
+        }
     } else if rc_contents.is_empty() {
         block
     } else {
@@ -301,6 +307,21 @@ mod tests {
         let second = insert_or_replace_block(&first, "new hook body");
         assert!(!second.contains("old hook body"), "old body still present");
         assert!(second.contains("new hook body"));
+    }
+
+    #[test]
+    fn insert_or_replace_no_double_blank_line_on_replace() {
+        let first = insert_or_replace_block("", "hook body");
+        let second = insert_or_replace_block(&first, "hook body v2");
+        assert!(
+            !second.contains("\n\n\n"),
+            "double blank line found after replace: {:?}",
+            second
+        );
+        assert!(
+            !second.starts_with('\n'),
+            "result starts with blank line after replace"
+        );
     }
 
     #[test]
