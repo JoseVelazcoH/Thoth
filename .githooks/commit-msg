@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# commitlint — validates commit messages against Conventional Commits 1.0.0
+# Installed via .pre-commit-config.yaml (stages: [commit-msg])
+
+set -euo pipefail
+
+COMMIT_MSG_FILE="${1}"
+COMMIT_MSG="$(cat "${COMMIT_MSG_FILE}")"
+
+# Strip comment lines
+MSG="$(echo "${COMMIT_MSG}" | grep -v '^#' | head -1)"
+
+# Conventional Commits pattern
+# <type>(<scope>)!: <description>
+PATTERN='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9_/-]+\))?(!)?: .{1,100}$'
+
+if ! echo "${MSG}" | grep -qE "${PATTERN}"; then
+  echo ""
+  echo "  commitlint: invalid commit message"
+  echo ""
+  echo "  Got:      ${MSG}"
+  echo ""
+  echo "  Expected: <type>(<scope>): <description>"
+  echo ""
+  echo "  Valid types: feat fix docs style refactor perf test build ci chore revert"
+  echo "  See: docs/commit-convention.md"
+  echo ""
+  exit 1
+fi
+
+# Description must not be empty after the colon+space
+DESCRIPTION="$(echo "${MSG}" | sed 's/^[^:]*: //')"
+if [[ -z "${DESCRIPTION}" ]]; then
+  echo "  commitlint: description must not be empty"
+  exit 1
+fi
+
+exit 0
