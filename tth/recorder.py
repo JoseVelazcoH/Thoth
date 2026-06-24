@@ -12,7 +12,19 @@ from tth.database import get_connection
 from tth.project import infer_project
 from tth.session import get_or_create
 
-ERROR_LOG = Path("~/.local/share/thoth/error.log").expanduser()
+def _resolve_error_log() -> Path:
+    """Return error log path honoring THOTH_ERROR_LOG > XDG_DATA_HOME > default."""
+    override = os.environ.get("THOTH_ERROR_LOG")
+    if override:
+        return Path(override)
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg:
+        return Path(xdg) / "thoth" / "error.log"
+    return Path("~/.local/share/thoth/error.log").expanduser()
+
+
+# Module-level reference kept so tests can monkeypatch it directly.
+ERROR_LOG = _resolve_error_log()
 
 app = typer.Typer()
 

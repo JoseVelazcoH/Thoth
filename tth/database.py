@@ -1,6 +1,7 @@
 """Database layer: schema migrations, connection factory, FTS5 helpers."""
 
 import logging
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -9,8 +10,21 @@ from tth.schema import SCHEMA_V1, SCHEMA_V2_FTS
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DB_PATH = Path("~/.local/share/thoth/history.db").expanduser()
 BUSY_TIMEOUT_MS = 2000
+
+# Legacy sentinel kept for external callers; resolved dynamically via _resolve_db_path().
+DEFAULT_DB_PATH = Path("~/.local/share/thoth/history.db").expanduser()
+
+
+def _resolve_db_path() -> Path:
+    """Return the DB path honoring THOTH_DB > XDG_DATA_HOME > default."""
+    override = os.environ.get("THOTH_DB")
+    if override:
+        return Path(override)
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg:
+        return Path(xdg) / "thoth" / "history.db"
+    return Path("~/.local/share/thoth/history.db").expanduser()
 
 MIGRATIONS: list[tuple[int, str]] = [
     (1, SCHEMA_V1),
@@ -26,9 +40,9 @@ def connect(db_path: str = ":memory:") -> sqlite3.Connection:
     return conn
 
 
-def get_connection(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
+def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     """Production connection: ensure directory, apply PRAGMAs, run migrations."""
-    db_path = Path(db_path)
+    db_path = Path(db_path) if db_path is not None else _resolve_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
