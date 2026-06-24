@@ -4,6 +4,7 @@ import json
 import sqlite3
 import time
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 
 _CACHE_TTL_SECONDS = 86400  # 24 hours
@@ -83,7 +84,7 @@ def _extract_gomod(p: Path) -> str | None:
 
 
 # Each entry is (filename, extractor). Directory-name markers use is_dir() check below.
-_MARKER_STRATEGIES: list[tuple[str, object]] = [
+_MARKER_STRATEGIES: list[tuple[str, Callable[[Path], str | None]]] = [
     (".git", lambda p: p.parent.name),          # directory marker: use is_dir() check below
     ("package.json", _extract_package_json),
     ("pyproject.toml", _extract_pyproject),
