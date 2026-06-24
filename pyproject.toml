@@ -6,10 +6,8 @@ build-backend = "hatchling.build"
 name = "thoth"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = [
-    "typer>=0.12",
-    "rich",
-]
+dependencies = []
+# typer and rich will return with the query/display slice
 
 [project.scripts]
 tth = "tth.cli:main"
