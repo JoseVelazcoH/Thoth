@@ -135,8 +135,8 @@ def record_cmd(
             timestamp = int(time.time())
         conn = get_connection()
         record(cmd, dir_, exit_, duration, timestamp, tags, conn)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_error(exc)
     finally:
         if conn is not None:
             try:

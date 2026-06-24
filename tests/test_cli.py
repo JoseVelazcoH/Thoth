@@ -65,6 +65,23 @@ def test_cli_all_six_flags(temp_db):
 
 
 
+def test_setup_failure_logs_and_exits_0(monkeypatch, tmp_path_factory):
+    """get_connection() raising must log the error AND keep exit code 0."""
+    log_dir = tmp_path_factory.mktemp("setup_fail_logs")
+    log_file = log_dir / "error.log"
+
+    monkeypatch.setattr(
+        "tth.recorder.get_connection",
+        lambda: (_ for _ in ()).throw(RuntimeError("disk full")),
+    )
+    monkeypatch.setattr("tth.recorder.ERROR_LOG", log_file)
+
+    result = runner.invoke(app, ["--cmd", "echo hi"])
+    assert result.exit_code == 0
+    assert log_file.exists(), "Error log must be written on setup failure"
+    assert "disk full" in log_file.read_text()
+
+
 def test_cli_default_dir_is_cwd(temp_db, monkeypatch, tmp_path):
     """Omitting --dir should store the real cwd as directory (hermetic, no /tmp)."""
     monkeypatch.chdir(tmp_path)
