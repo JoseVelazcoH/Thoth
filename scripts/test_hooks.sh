@@ -174,12 +174,46 @@ _run_zsh_flag_check() {
     _check_flags_in_file "thoth.zsh" "${REPO_ROOT}/shells/thoth.zsh"
 }
 
+_run_bash_trap_chain_single_quote_test() {
+    if (( BASH_VERSINFO[0] < 5 )); then
+        _skip "bash < 5; trap chain test requires bash >= 5"
+        return
+    fi
+
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' RETURN
+
+    local trap_log="$tmpdir/trap.log"
+    local err_log="$tmpdir/err.log"
+
+    local after_err_log="$tmpdir/after_err.log"
+
+    bash --norc --noprofile -c "
+        trap 'echo it'\\''s here >> \"$trap_log\"' DEBUG
+        source '${REPO_ROOT}/shells/thoth.bash' 2>/dev/null || true
+        echo trigger 2>'$after_err_log'
+    " 2>/dev/null || true
+
+    local after_err=""
+    if [[ -f "$after_err_log" ]]; then
+        after_err="$(cat "$after_err_log")"
+    fi
+
+    if [[ "$after_err" == *"EOF"* ]] || [[ "$after_err" == *"inesperado"* ]] || [[ "$after_err" == *"unexpected"* ]] || [[ "$after_err" == *"syntax error"* ]] || [[ "$after_err" == *"parse error"* ]] || [[ "$after_err" == *"debug trap"* ]]; then
+        _fail "bash: DEBUG trap chain breaks with single-quoted prior trap body"
+    else
+        _pass "bash: DEBUG trap chain survives prior trap body containing single quote"
+    fi
+}
+
 echo "=== Thoth shell hook smoke tests ==="
 _run_bash_version_check
 _run_bash_syntax_check
 _run_zsh_syntax_check
 _run_flag_check
 _run_zsh_flag_check
+_run_bash_trap_chain_single_quote_test
 _run_bash_test
 _run_bash_record_test
 _run_zsh_test

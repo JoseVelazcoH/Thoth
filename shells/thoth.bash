@@ -5,12 +5,16 @@ command -v tth >/dev/null 2>&1 || return
 export TTH_SESSION_ID
 
 _THOTH_IN_PROMPT=0
+_THOTH_PREV_DEBUG=""
 
 _thoth_preexec() {
     [[ $_THOTH_IN_PROMPT -eq 1 ]] && return
     [[ "$BASH_COMMAND" == "_thoth_precmd" ]] && return
     _THOTH_CMD="$BASH_COMMAND"
     _THOTH_START=$EPOCHREALTIME
+    if [[ -n "$_THOTH_PREV_DEBUG" ]]; then
+        eval "$_THOTH_PREV_DEBUG"
+    fi
 }
 
 _thoth_precmd() {
@@ -23,7 +27,7 @@ _thoth_precmd() {
         --dir "$PWD" \
         --exit "$_exit" \
         --duration "$_dur" \
-        --timestamp "$(date +%s)" \
+        --timestamp "$EPOCHSECONDS" \
         --tags "${TTH_ACTIVE_TAGS:-[]}" \
         --terminal-id "$TTH_SESSION_ID" &
     _THOTH_CMD=""
@@ -31,15 +35,15 @@ _thoth_precmd() {
 }
 
 _thoth_chain_debug() {
-    local _existing
-    _existing="$(trap -p DEBUG)"
-    if [[ -n "$_existing" ]]; then
-        _existing="${_existing#trap -- \'}"
-        _existing="${_existing%\' DEBUG}"
-        trap "_thoth_preexec; $_existing" DEBUG
-    else
-        trap '_thoth_preexec' DEBUG
+    local _raw _body_quoted
+    _raw="$(trap -p DEBUG 2>/dev/null)"
+    trap - DEBUG
+    if [[ -n "$_raw" ]]; then
+        _body_quoted="${_raw#trap -- }"
+        _body_quoted="${_body_quoted% DEBUG}"
+        eval "_THOTH_PREV_DEBUG=${_body_quoted}"
     fi
+    trap '_thoth_preexec' DEBUG
 }
 _thoth_chain_debug
 
