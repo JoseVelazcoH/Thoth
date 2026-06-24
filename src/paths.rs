@@ -1,33 +1,45 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-pub fn resolve_db_path() -> PathBuf {
-    if let Ok(v) = std::env::var("THOTH_DB") {
+fn db_path_from(thoth_db: Option<&str>, xdg: Option<&str>, home: &Path) -> PathBuf {
+    if let Some(v) = thoth_db {
         return PathBuf::from(v);
     }
-    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-        return PathBuf::from(xdg).join("thoth").join("history.db");
+    if let Some(x) = xdg {
+        return PathBuf::from(x).join("thoth").join("history.db");
     }
+    home.join(".local").join("share").join("thoth").join("history.db")
+}
+
+fn error_log_from(thoth_log: Option<&str>, xdg: Option<&str>, home: &Path) -> PathBuf {
+    if let Some(v) = thoth_log {
+        return PathBuf::from(v);
+    }
+    if let Some(x) = xdg {
+        return PathBuf::from(x).join("thoth").join("error.log");
+    }
+    home.join(".local").join("share").join("thoth").join("error.log")
+}
+
+pub fn resolve_db_path() -> PathBuf {
+    let thoth_db = std::env::var("THOTH_DB").ok();
+    let xdg = std::env::var("XDG_DATA_HOME").ok();
     let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
-    PathBuf::from(home)
-        .join(".local")
-        .join("share")
-        .join("thoth")
-        .join("history.db")
+    db_path_from(
+        thoth_db.as_deref(),
+        xdg.as_deref(),
+        Path::new(&home),
+    )
 }
 
 pub fn resolve_error_log() -> PathBuf {
-    if let Ok(v) = std::env::var("THOTH_ERROR_LOG") {
-        return PathBuf::from(v);
-    }
-    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-        return PathBuf::from(xdg).join("thoth").join("error.log");
-    }
+    let thoth_log = std::env::var("THOTH_ERROR_LOG").ok();
+    let xdg = std::env::var("XDG_DATA_HOME").ok();
     let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
-    PathBuf::from(home)
-        .join(".local")
-        .join("share")
-        .join("thoth")
-        .join("error.log")
+    error_log_from(
+        thoth_log.as_deref(),
+        xdg.as_deref(),
+        Path::new(&home),
+    )
 }
 
 #[cfg(test)]
@@ -36,65 +48,68 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn thoth_db_env_wins() {
-        std::env::set_var("THOTH_DB_TEST_01", "/tmp/x_01.db");
-        let path = {
-            if let Ok(v) = std::env::var("THOTH_DB_TEST_01") {
-                PathBuf::from(v)
-            } else {
-                panic!("var not set")
-            }
-        };
-        assert_eq!(path, PathBuf::from("/tmp/x_01.db"));
-        std::env::remove_var("THOTH_DB_TEST_01");
+    fn db_override_wins() {
+        let result = db_path_from(
+            Some("/custom/history.db"),
+            Some("/xdg"),
+            Path::new("/home/user"),
+        );
+        assert_eq!(result, PathBuf::from("/custom/history.db"));
     }
 
     #[test]
-    fn xdg_fallback() {
-        std::env::remove_var("THOTH_DB");
-        std::env::set_var("THOTH_DB_XDG_TEST", "/tmp/xdg_02");
-        let path = PathBuf::from(std::env::var("THOTH_DB_XDG_TEST").unwrap())
-            .join("thoth")
-            .join("history.db");
-        assert_eq!(path, PathBuf::from("/tmp/xdg_02/thoth/history.db"));
-        std::env::remove_var("THOTH_DB_XDG_TEST");
+    fn db_xdg_fallback() {
+        let result = db_path_from(None, Some("/xdg/data"), Path::new("/home/user"));
+        assert_eq!(result, PathBuf::from("/xdg/data/thoth/history.db"));
     }
 
     #[test]
-    fn home_fallback() {
-        let home = "/tmp/h_03";
-        let path = PathBuf::from(home)
-            .join(".local")
-            .join("share")
-            .join("thoth")
-            .join("history.db");
+    fn db_home_fallback() {
+        let result = db_path_from(None, None, Path::new("/home/user"));
         assert_eq!(
-            path,
-            PathBuf::from("/tmp/h_03/.local/share/thoth/history.db")
+            result,
+            PathBuf::from("/home/user/.local/share/thoth/history.db")
         );
     }
 
     #[test]
-    fn error_log_env_wins() {
-        std::env::set_var("THOTH_ERROR_LOG_TEST_04", "/tmp/err_04.log");
-        let path = PathBuf::from(std::env::var("THOTH_ERROR_LOG_TEST_04").unwrap());
-        assert_eq!(path, PathBuf::from("/tmp/err_04.log"));
-        std::env::remove_var("THOTH_ERROR_LOG_TEST_04");
+    fn error_log_override_wins() {
+        let result = error_log_from(
+            Some("/custom/error.log"),
+            Some("/xdg"),
+            Path::new("/home/user"),
+        );
+        assert_eq!(result, PathBuf::from("/custom/error.log"));
     }
 
     #[test]
-    fn resolve_db_path_uses_thoth_db() {
-        std::env::set_var("THOTH_DB", "/tmp/test_path_05.db");
+    fn error_log_xdg_fallback() {
+        let result = error_log_from(None, Some("/xdg/data"), Path::new("/home/user"));
+        assert_eq!(result, PathBuf::from("/xdg/data/thoth/error.log"));
+    }
+
+    #[test]
+    fn error_log_home_fallback() {
+        let result = error_log_from(None, None, Path::new("/home/user"));
+        assert_eq!(
+            result,
+            PathBuf::from("/home/user/.local/share/thoth/error.log")
+        );
+    }
+
+    #[test]
+    fn resolve_db_path_wires_thoth_db() {
+        std::env::set_var("THOTH_DB", "/tmp/wiring_test.db");
         let result = resolve_db_path();
         std::env::remove_var("THOTH_DB");
-        assert_eq!(result, PathBuf::from("/tmp/test_path_05.db"));
+        assert_eq!(result, PathBuf::from("/tmp/wiring_test.db"));
     }
 
     #[test]
-    fn resolve_error_log_uses_thoth_error_log() {
-        std::env::set_var("THOTH_ERROR_LOG", "/tmp/test_error_06.log");
+    fn resolve_error_log_wires_thoth_error_log() {
+        std::env::set_var("THOTH_ERROR_LOG", "/tmp/wiring_test.log");
         let result = resolve_error_log();
         std::env::remove_var("THOTH_ERROR_LOG");
-        assert_eq!(result, PathBuf::from("/tmp/test_error_06.log"));
+        assert_eq!(result, PathBuf::from("/tmp/wiring_test.log"));
     }
 }
