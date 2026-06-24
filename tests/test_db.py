@@ -77,6 +77,40 @@ def test_fts5_unavailable_no_raise():
     conn.close()
 
 
+def test_fts5_skip_does_not_record_version():
+    """When FTS5 is unavailable, schema_version must NOT contain version 2.
+
+    This allows migration 2 to be retried on a future startup when FTS5 becomes
+    available. Recording version=2 on skip would permanently suppress the retry.
+    """
+    conn = connect()
+    with patch("tth.database.fts5_available", return_value=False):
+        apply_migrations(conn)
+    ver = current_version(conn)
+    assert ver == 1, f"Expected version 1 after FTS5 skip, got {ver}"
+    conn.close()
+
+
+def test_fts5_skip_then_available_applies_migration():
+    """After a skipped FTS5 migration, a subsequent startup with FTS5 available applies it."""
+    conn = connect()
+    # First startup: FTS5 unavailable -> skip
+    with patch("tth.database.fts5_available", return_value=False):
+        apply_migrations(conn)
+    assert current_version(conn) == 1
+
+    # Second startup: FTS5 now available -> migration applies
+    apply_migrations(conn)
+    if not fts5_available(conn):
+        import pytest
+        pytest.skip("FTS5 not available in this build")
+    assert current_version(conn) == 2
+    # commands_fts virtual table must exist
+    tables = _table_names(conn)
+    assert "commands_fts" in tables, "commands_fts not found after FTS5 migration"
+    conn.close()
+
+
 def test_migration_is_atomic():
     """A migration whose second statement is invalid must not advance schema_version."""
     conn = connect()

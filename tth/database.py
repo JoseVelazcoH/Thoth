@@ -119,15 +119,10 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
 
         # Guard FTS5 migration
         if version == 2 and not fts5_available(conn):
+            # Do NOT record the version: leaving current_version at 1 lets the
+            # migration retry on the next startup. When FTS5 becomes available
+            # it will apply naturally without any manual intervention.
             logger.warning("FTS5 not available — skipping FTS migration v%d", version)
-            # Record the version so we do not retry on every startup.
-            # This small INSERT is its own implicit transaction; that is
-            # acceptable because skipping FTS is not a failure path.
-            conn.execute(
-                "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(?, ?)",
-                (version, int(time.time())),
-            )
-            conn.commit()
             continue
 
         # Split the SQL block via _split_sql (see its docstring for rationale).
