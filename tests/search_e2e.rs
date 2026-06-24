@@ -247,3 +247,193 @@ fn search_show_session_exits_0_with_separator() {
     let text = String::from_utf8_lossy(&out);
     assert!(text.contains("---"), "expected session separator in output");
 }
+
+fn setup_duration_boundary() -> Fixture {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("history.db").to_string_lossy().to_string();
+    let log = dir.path().join("error.log").to_string_lossy().to_string();
+    let alpha = dir.path().join("alpha");
+    std::fs::create_dir_all(alpha.join(".git")).unwrap();
+    let alpha_str = alpha.to_string_lossy().to_string();
+    let beta = dir.path().join("beta");
+    std::fs::create_dir_all(beta.join(".git")).unwrap();
+    let beta_str = beta.to_string_lossy().to_string();
+
+    record(
+        &db,
+        &log,
+        RecordInput {
+            cmd: "fast_cmd",
+            dir: &alpha_str,
+            exit: 0,
+            dur: 999,
+            tags: "[]",
+            ts: 1_700_000_000,
+        },
+    );
+    record(
+        &db,
+        &log,
+        RecordInput {
+            cmd: "slow_cmd",
+            dir: &alpha_str,
+            exit: 0,
+            dur: 3200,
+            tags: "[]",
+            ts: 1_700_001_000,
+        },
+    );
+    record(
+        &db,
+        &log,
+        RecordInput {
+            cmd: "both_tags_cmd",
+            dir: &alpha_str,
+            exit: 0,
+            dur: 500,
+            tags: r#"["tagA","tagB"]"#,
+            ts: 1_700_002_000,
+        },
+    );
+    record(
+        &db,
+        &log,
+        RecordInput {
+            cmd: "only_tagA_cmd",
+            dir: &beta_str,
+            exit: 0,
+            dur: 500,
+            tags: r#"["tagA"]"#,
+            ts: 1_700_003_000,
+        },
+    );
+    record(
+        &db,
+        &log,
+        RecordInput {
+            cmd: "session2_cmd",
+            dir: &beta_str,
+            exit: 0,
+            dur: 200,
+            tags: "[]",
+            ts: 1_700_010_000,
+        },
+    );
+
+    Fixture {
+        _dir: dir,
+        db,
+        log,
+        _alpha_dir: alpha_str,
+        _beta_dir: beta_str,
+    }
+}
+
+#[test]
+fn search_duration_boundary_include_exclude() {
+    let f = setup_duration_boundary();
+    let out = tth()
+        .env("THOTH_DB", &f.db)
+        .env("THOTH_ERROR_LOG", &f.log)
+        .args(["search", "--duration", ">1"])
+        .assert()
+        .code(0)
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8_lossy(&out);
+    assert!(
+        text.contains("slow_cmd"),
+        "slow_cmd (3200ms) should be included by >1s filter"
+    );
+    assert!(
+        !text.contains("fast_cmd"),
+        "fast_cmd (999ms) should be excluded by >1s filter"
+    );
+}
+
+#[test]
+fn search_tag_and_filter_requires_both() {
+    let f = setup_duration_boundary();
+    let out = tth()
+        .env("THOTH_DB", &f.db)
+        .env("THOTH_ERROR_LOG", &f.log)
+        .args(["search", "--tag", "tagA", "--tag", "tagB"])
+        .assert()
+        .code(0)
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8_lossy(&out);
+    assert!(
+        text.contains("both_tags_cmd"),
+        "row with both tagA and tagB should be included"
+    );
+    assert!(
+        !text.contains("only_tagA_cmd"),
+        "row with only tagA should be excluded by AND filter"
+    );
+}
+
+#[test]
+fn search_show_session_two_sessions_shows_two_headers() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("history.db").to_string_lossy().to_string();
+    let log = dir.path().join("error.log").to_string_lossy().to_string();
+    let alpha = dir.path().join("alpha");
+    std::fs::create_dir_all(alpha.join(".git")).unwrap();
+    let alpha_str = alpha.to_string_lossy().to_string();
+    let beta = dir.path().join("beta");
+    std::fs::create_dir_all(beta.join(".git")).unwrap();
+    let beta_str = beta.to_string_lossy().to_string();
+
+    record(
+        &db,
+        &log,
+        RecordInput {
+            cmd: "session1_cmd",
+            dir: &alpha_str,
+            exit: 0,
+            dur: 100,
+            tags: "[]",
+            ts: 1_700_000_000,
+        },
+    );
+    record(
+        &db,
+        &log,
+        RecordInput {
+            cmd: "session2_cmd",
+            dir: &beta_str,
+            exit: 0,
+            dur: 200,
+            tags: "[]",
+            ts: 1_700_100_000,
+        },
+    );
+
+    let out = tth()
+        .env("THOTH_DB", &db)
+        .env("THOTH_ERROR_LOG", &log)
+        .args(["search", "--show-session"])
+        .assert()
+        .code(0)
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8_lossy(&out);
+    let header_count = text.lines().filter(|l| l.starts_with("---")).count();
+    assert_eq!(
+        header_count, 2,
+        "expected two session headers; got: {header_count}\noutput:\n{text}"
+    );
+    assert!(
+        text.contains("session1_cmd"),
+        "session1_cmd must appear in output"
+    );
+    assert!(
+        text.contains("session2_cmd"),
+        "session2_cmd must appear in output"
+    );
+    assert!(text.contains("2 result(s)"), "count line must be present");
+}

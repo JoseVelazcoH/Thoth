@@ -499,11 +499,6 @@ mod tests {
     }
 
     #[test]
-    fn exit_filter_eq() {
-        assert_eq!(ExitFilter::Ok, ExitFilter::Ok);
-    }
-
-    #[test]
     fn build_query_no_filters() {
         let args = default_args();
         let (sql, params) = build_query(&args, FIXED_NOW).unwrap();
