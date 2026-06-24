@@ -307,6 +307,49 @@ fn status_exits_0_and_prints_info() {
 }
 
 #[test]
+fn lifecycle_error_exits_nonzero_and_prints_stderr() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("history.db");
+    let unwritable = dir.path().join("no").join("such").join("path.rc");
+    tth()
+        .env("THOTH_DB", db_path.to_str().unwrap())
+        .env(
+            "THOTH_ERROR_LOG",
+            dir.path().join("error.log").to_str().unwrap(),
+        )
+        .args([
+            "install",
+            "--shell",
+            "bash",
+            "--rc-file",
+            unwritable.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::starts_with("tth: "));
+}
+
+#[test]
+fn record_never_fail_contract_preserved() {
+    let dir = TempDir::new().unwrap();
+    let ro_dir = dir.path().join("readonly");
+    std::fs::create_dir_all(&ro_dir).unwrap();
+    let mut perms = std::fs::metadata(&ro_dir).unwrap().permissions();
+    use std::os::unix::fs::PermissionsExt;
+    perms.set_mode(0o444);
+    std::fs::set_permissions(&ro_dir, perms).unwrap();
+    tth()
+        .env("THOTH_DB", ro_dir.join("history.db").to_str().unwrap())
+        .env(
+            "THOTH_ERROR_LOG",
+            dir.path().join("error.log").to_str().unwrap(),
+        )
+        .args(["record", "--cmd", "whoami"])
+        .assert()
+        .code(0);
+}
+
+#[test]
 fn record_still_exits_0_after_dispatch_refactor() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("history.db");
