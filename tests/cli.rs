@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+use predicates::prelude::*;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -176,4 +177,146 @@ fn cli_default_dir_is_cwd() {
         .query_row("SELECT directory FROM commands", [], |r| r.get(0))
         .unwrap();
     assert_eq!(directory, cwd.to_string_lossy().as_ref());
+}
+
+#[test]
+fn new_session_id_prints_uuid() {
+    let output = tth().args(["new-session-id"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let trimmed = stdout.trim();
+    assert_eq!(trimmed.len(), 36, "expected uuid v4 length");
+    assert_eq!(
+        trimmed.chars().filter(|&c| c == '-').count(),
+        4,
+        "expected 4 hyphens in uuid"
+    );
+}
+
+#[test]
+fn new_session_id_differs_across_runs() {
+    let out1 = tth().args(["new-session-id"]).output().unwrap();
+    let out2 = tth().args(["new-session-id"]).output().unwrap();
+    let id1 = String::from_utf8(out1.stdout).unwrap();
+    let id2 = String::from_utf8(out2.stdout).unwrap();
+    assert_ne!(
+        id1.trim(),
+        id2.trim(),
+        "two runs must produce distinct uuids"
+    );
+}
+
+#[test]
+fn install_writes_sentinel_to_rc_file() {
+    let dir = TempDir::new().unwrap();
+    let rc = dir.path().join(".bashrc");
+    let db_path = dir.path().join("history.db");
+    tth()
+        .env("THOTH_DB", db_path.to_str().unwrap())
+        .env(
+            "THOTH_ERROR_LOG",
+            dir.path().join("error.log").to_str().unwrap(),
+        )
+        .args([
+            "install",
+            "--shell",
+            "bash",
+            "--rc-file",
+            rc.to_str().unwrap(),
+        ])
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("Installed"));
+    let content = std::fs::read_to_string(&rc).unwrap();
+    assert!(content.contains("# === THOTH HOOKS BEGIN ==="));
+}
+
+#[test]
+fn install_idempotent_no_duplicate_sentinel() {
+    let dir = TempDir::new().unwrap();
+    let rc = dir.path().join(".zshrc");
+    let db_path = dir.path().join("history.db");
+    for _ in 0..2 {
+        tth()
+            .env("THOTH_DB", db_path.to_str().unwrap())
+            .env(
+                "THOTH_ERROR_LOG",
+                dir.path().join("error.log").to_str().unwrap(),
+            )
+            .args([
+                "install",
+                "--shell",
+                "zsh",
+                "--rc-file",
+                rc.to_str().unwrap(),
+            ])
+            .assert()
+            .code(0);
+    }
+    let content = std::fs::read_to_string(&rc).unwrap();
+    assert_eq!(content.matches("# === THOTH HOOKS BEGIN ===").count(), 1);
+}
+
+#[test]
+fn uninstall_removes_sentinel_from_rc_file() {
+    let dir = TempDir::new().unwrap();
+    let rc = dir.path().join(".bashrc");
+    let db_path = dir.path().join("history.db");
+    tth()
+        .env("THOTH_DB", db_path.to_str().unwrap())
+        .env(
+            "THOTH_ERROR_LOG",
+            dir.path().join("error.log").to_str().unwrap(),
+        )
+        .args([
+            "install",
+            "--shell",
+            "bash",
+            "--rc-file",
+            rc.to_str().unwrap(),
+        ])
+        .assert()
+        .code(0);
+    tth()
+        .env("THOTH_DB", db_path.to_str().unwrap())
+        .env(
+            "THOTH_ERROR_LOG",
+            dir.path().join("error.log").to_str().unwrap(),
+        )
+        .args(["uninstall", "--rc-file", rc.to_str().unwrap()])
+        .assert()
+        .code(0);
+    let content = std::fs::read_to_string(&rc).unwrap();
+    assert!(!content.contains("# === THOTH HOOKS BEGIN ==="));
+}
+
+#[test]
+fn status_exits_0_and_prints_info() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("history.db");
+    tth()
+        .env("THOTH_DB", db_path.to_str().unwrap())
+        .env(
+            "THOTH_ERROR_LOG",
+            dir.path().join("error.log").to_str().unwrap(),
+        )
+        .args(["status"])
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("Schema version"));
+}
+
+#[test]
+fn record_still_exits_0_after_dispatch_refactor() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("history.db");
+    tth()
+        .env("THOTH_DB", db_path.to_str().unwrap())
+        .env(
+            "THOTH_ERROR_LOG",
+            dir.path().join("error.log").to_str().unwrap(),
+        )
+        .args(["record", "--cmd", "echo test"])
+        .assert()
+        .code(0);
 }
