@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 ";
 
+pub const SCHEMA_V3_TERMINAL_ID: &str = "ALTER TABLE commands ADD COLUMN terminal_id TEXT;";
+
 pub const SCHEMA_V2_FTS: &str = "
 CREATE VIRTUAL TABLE IF NOT EXISTS commands_fts
     USING fts5(command, content='commands', content_rowid='id');
@@ -58,5 +60,15 @@ mod tests {
     #[test]
     fn v2_contains_fts() {
         assert!(super::SCHEMA_V2_FTS.contains("commands_fts"));
+    }
+
+    #[test]
+    fn v3_const_non_empty() {
+        assert!(!super::SCHEMA_V3_TERMINAL_ID.is_empty());
+    }
+
+    #[test]
+    fn v3_const_contains_terminal_id() {
+        assert!(super::SCHEMA_V3_TERMINAL_ID.contains("terminal_id"));
     }
 }
