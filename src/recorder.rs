@@ -1,1 +1,267 @@
+use crate::cli::RecordArgs;
+use crate::error::ThothError;
+use crate::logging::log_error;
+use crate::project::infer_project;
+use crate::session::get_or_create;
+use rusqlite::Connection;
 
+pub fn normalize_tags(raw: &str) -> String {
+    if raw.is_empty() {
+        return String::from("[]");
+    }
+    match serde_json::from_str::<serde_json::Value>(raw) {
+        Ok(serde_json::Value::Array(arr)) => {
+            if arr.iter().all(|v| v.is_string()) {
+                raw.to_string()
+            } else {
+                String::from("[]")
+            }
+        }
+        _ => String::from("[]"),
+    }
+}
+
+pub fn record_inner(args: &RecordArgs, conn: &mut Connection) -> Result<(), ThothError> {
+    let tags = normalize_tags(&args.tags);
+    let directory = args.dir.clone().unwrap_or_else(|| {
+        std::env::current_dir()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    });
+    let timestamp = args.timestamp.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64
+    });
+
+    let tx = conn.transaction()?;
+
+    let project = infer_project(&directory, &tx)?;
+    let sid = get_or_create(&project, timestamp, &tx)?;
+
+    tx.execute(
+        "INSERT INTO commands(command, directory, project, session_id, timestamp, exit_code, duration_ms, tags) \
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![
+            args.cmd,
+            directory,
+            project,
+            sid,
+            timestamp,
+            args.exit_code,
+            args.duration,
+            tags
+        ],
+    )?;
+
+    tx.execute(
+        "INSERT INTO projects(path, name, last_seen, command_count) VALUES(?1, ?2, ?3, 1) \
+         ON CONFLICT(path) DO UPDATE SET name=excluded.name, last_seen=excluded.last_seen, command_count=command_count+1",
+        rusqlite::params![directory, project, timestamp],
+    )?;
+
+    tx.execute(
+        "UPDATE sessions SET ended_at=?1, command_count=command_count+1 WHERE session_id=?2",
+        rusqlite::params![timestamp, sid],
+    )?;
+
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn record(args: &RecordArgs, conn: &mut Connection) {
+    match record_inner(args, conn) {
+        Ok(()) => {}
+        Err(ThothError::Sqlite(ref e))
+            if matches!(
+                e,
+                rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error {
+                        code: rusqlite::ErrorCode::DatabaseBusy,
+                        ..
+                    },
+                    _
+                ) | rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error {
+                        code: rusqlite::ErrorCode::DatabaseLocked,
+                        ..
+                    },
+                    _
+                )
+            ) =>
+        {
+            match record_inner(args, conn) {
+                Ok(()) => {}
+                Err(e) => log_error(&e.to_string()),
+            }
+        }
+        Err(e) => log_error(&e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::RecordArgs;
+    use rusqlite::Connection;
+    use tempfile::TempDir;
+
+    fn mem_conn() -> Connection {
+        let mut c = crate::database::connect_memory().unwrap();
+        crate::database::apply_migrations(&mut c).unwrap();
+        c
+    }
+
+    fn disk_conn(dir: &TempDir) -> Connection {
+        let path = dir.path().join("history.db");
+        crate::database::get_connection(Some(&path)).unwrap()
+    }
+
+    fn base_args() -> RecordArgs {
+        RecordArgs {
+            cmd: String::from("echo hi"),
+            dir: Some(String::from("/tmp")),
+            exit_code: 0,
+            duration: 5,
+            timestamp: Some(1700000000),
+            tags: String::from("[]"),
+        }
+    }
+
+    #[test]
+    fn normalize_tags_valid() {
+        assert_eq!(normalize_tags(r#"["a","b"]"#), r#"["a","b"]"#);
+    }
+
+    #[test]
+    fn normalize_tags_invalid() {
+        assert_eq!(normalize_tags("not json"), "[]");
+    }
+
+    #[test]
+    fn normalize_tags_not_array() {
+        assert_eq!(normalize_tags(r#"{"k":"v"}"#), "[]");
+    }
+
+    #[test]
+    fn normalize_tags_array_not_strings() {
+        assert_eq!(normalize_tags("[1,2]"), "[]");
+    }
+
+    #[test]
+    fn successful_record_inserts_row() {
+        let mut conn = mem_conn();
+        let args = base_args();
+        record_inner(&args, &mut conn).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM commands WHERE command='echo hi'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn command_count_increments() {
+        let mut conn = mem_conn();
+        let dir = "/tmp/count-test";
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        conn.execute(
+            "INSERT INTO projects(path, name, last_seen, command_count) VALUES(?1, 'myapp', ?2, 5)",
+            rusqlite::params![dir, now],
+        )
+        .unwrap();
+        let args = RecordArgs {
+            cmd: String::from("ls"),
+            dir: Some(dir.to_string()),
+            exit_code: 0,
+            duration: 1,
+            timestamp: Some(1700000000),
+            tags: String::from("[]"),
+        };
+        record_inner(&args, &mut conn).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT command_count FROM projects WHERE path=?1",
+                rusqlite::params![dir],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 6);
+    }
+
+    #[test]
+    fn session_updated_after_record() {
+        let mut conn = mem_conn();
+        let args = base_args();
+        record_inner(&args, &mut conn).unwrap();
+        let (ended_at, count): (i64, i64) = conn
+            .query_row("SELECT ended_at, command_count FROM sessions", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(ended_at, 1700000000);
+        assert!(count >= 1);
+    }
+
+    #[test]
+    fn atomicity_no_orphan_session() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("history.db");
+        let mut conn = crate::database::get_connection(Some(&db_path)).unwrap();
+
+        let conn2 = Connection::open(&db_path).unwrap();
+        conn2.execute_batch("PRAGMA busy_timeout=0;").unwrap();
+        conn2.execute("BEGIN IMMEDIATE", []).unwrap();
+
+        let args = base_args();
+        let result = record_inner(&args, &mut conn);
+
+        drop(conn2);
+
+        assert!(result.is_err());
+
+        let commands: i64 = conn
+            .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
+            .unwrap();
+        let sessions: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(commands, 0, "orphan command found");
+        assert_eq!(sessions, 0, "orphan session found");
+    }
+
+    #[test]
+    fn locked_db_retry_succeeds() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = disk_conn(&dir);
+        let args = base_args();
+        record(&args, &mut conn);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn record_never_propagates_error() {
+        let dir = TempDir::new().unwrap();
+        let mut conn = disk_conn(&dir);
+        let bad_args = RecordArgs {
+            cmd: String::from("cmd"),
+            dir: Some(String::from("/tmp")),
+            exit_code: 0,
+            duration: 0,
+            timestamp: Some(1700000000),
+            tags: String::from("not valid json"),
+        };
+        record(&bad_args, &mut conn);
+    }
+}
