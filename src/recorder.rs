@@ -284,6 +284,9 @@ mod tests {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count, 0, "no row should have been inserted on double failure");
+        assert_eq!(
+            count, 0,
+            "no row should have been inserted on double failure"
+        );
     }
 }

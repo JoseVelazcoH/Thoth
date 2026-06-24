@@ -7,7 +7,10 @@ fn db_path_from(thoth_db: Option<&str>, xdg: Option<&str>, home: &Path) -> PathB
     if let Some(x) = xdg {
         return PathBuf::from(x).join("thoth").join("history.db");
     }
-    home.join(".local").join("share").join("thoth").join("history.db")
+    home.join(".local")
+        .join("share")
+        .join("thoth")
+        .join("history.db")
 }
 
 fn error_log_from(thoth_log: Option<&str>, xdg: Option<&str>, home: &Path) -> PathBuf {
@@ -17,29 +20,24 @@ fn error_log_from(thoth_log: Option<&str>, xdg: Option<&str>, home: &Path) -> Pa
     if let Some(x) = xdg {
         return PathBuf::from(x).join("thoth").join("error.log");
     }
-    home.join(".local").join("share").join("thoth").join("error.log")
+    home.join(".local")
+        .join("share")
+        .join("thoth")
+        .join("error.log")
 }
 
 pub fn resolve_db_path() -> PathBuf {
     let thoth_db = std::env::var("THOTH_DB").ok();
     let xdg = std::env::var("XDG_DATA_HOME").ok();
     let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
-    db_path_from(
-        thoth_db.as_deref(),
-        xdg.as_deref(),
-        Path::new(&home),
-    )
+    db_path_from(thoth_db.as_deref(), xdg.as_deref(), Path::new(&home))
 }
 
 pub fn resolve_error_log() -> PathBuf {
     let thoth_log = std::env::var("THOTH_ERROR_LOG").ok();
     let xdg = std::env::var("XDG_DATA_HOME").ok();
     let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
-    error_log_from(
-        thoth_log.as_deref(),
-        xdg.as_deref(),
-        Path::new(&home),
-    )
+    error_log_from(thoth_log.as_deref(), xdg.as_deref(), Path::new(&home))
 }
 
 #[cfg(test)]
