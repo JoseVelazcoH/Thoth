@@ -78,7 +78,6 @@ pub fn apply_migrations(conn: &mut Connection) -> Result<(), ThothError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     fn mem_conn() -> Connection {
         let mut c = connect_memory().unwrap();
@@ -166,7 +165,7 @@ mod tests {
 
     #[test]
     fn fts_skip_does_not_record_v2() {
-        let mut conn = connect_memory().unwrap();
+        let conn = connect_memory().unwrap();
         conn.execute_batch(SCHEMA_V1).unwrap();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
