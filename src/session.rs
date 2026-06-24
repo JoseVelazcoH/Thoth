@@ -29,11 +29,17 @@ pub fn get_or_create(
             rusqlite::params![sid, project, timestamp, timestamp],
         )?;
         Ok(sid)
-    } else {
-        let sid = row.unwrap().0;
+    } else if let Some((sid, _, _)) = row {
         conn.execute(
             "UPDATE sessions SET ended_at=?1 WHERE session_id=?2",
             rusqlite::params![timestamp, sid],
+        )?;
+        Ok(sid)
+    } else {
+        let sid = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO sessions(session_id, project, started_at, ended_at, command_count) VALUES(?1, ?2, ?3, ?4, 0)",
+            rusqlite::params![sid, project, timestamp, timestamp],
         )?;
         Ok(sid)
     }
