@@ -75,8 +75,32 @@ fn parse_ymd(s: &str) -> Result<i64, ThothError> {
         return Err(ThothError::Search(format!("invalid date: {s}")));
     }
 
+    let max_day = month_max_day(year, month);
+    if day > max_day {
+        return Err(ThothError::Search(format!("invalid date: {s}")));
+    }
+
     let days = days_since_epoch(year, month, day);
     Ok(days * SECS_PER_DAY)
+}
+
+fn is_leap_year(year: i64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+fn month_max_day(year: i64, month: i64) -> i64 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if is_leap_year(year) {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 0,
+    }
 }
 
 fn days_since_epoch(year: i64, month: i64, day: i64) -> i64 {
@@ -448,6 +472,32 @@ mod tests {
     }
 
     #[test]
+    fn parse_date_feb_31_is_err() {
+        assert!(parse_date("2024-02-31", FIXED_NOW).is_err());
+    }
+
+    #[test]
+    fn parse_date_feb_29_non_leap_is_err() {
+        assert!(parse_date("2023-02-29", FIXED_NOW).is_err());
+    }
+
+    #[test]
+    fn parse_date_feb_29_leap_is_ok() {
+        assert!(parse_date("2024-02-29", FIXED_NOW).is_ok());
+    }
+
+    #[test]
+    fn parse_date_april_31_is_err() {
+        assert!(parse_date("2024-04-31", FIXED_NOW).is_err());
+    }
+
+    #[test]
+    fn parse_date_valid_ymd_returns_epoch() {
+        let result = parse_date("2024-01-01", FIXED_NOW).unwrap();
+        assert_eq!(result, days_since_epoch(2024, 1, 1) * SECS_PER_DAY);
+    }
+
+    #[test]
     fn exit_filter_eq() {
         assert_eq!(ExitFilter::Ok, ExitFilter::Ok);
     }
@@ -612,7 +662,10 @@ mod tests {
         if !crate::database::fts5_available(&conn) {
             return;
         }
-        seed(&conn, s("docker-compose up", "p", 1_000, 0, 100, "[]", "s1"));
+        seed(
+            &conn,
+            s("docker-compose up", "p", 1_000, 0, 100, "[]", "s1"),
+        );
         seed(&conn, s("ls -la", "p", 2_000, 0, 100, "[]", "s1"));
         let args = SearchArgs {
             query: Some("docker-compose".into()),
