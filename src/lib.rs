@@ -7,4 +7,5 @@ pub mod paths;
 pub mod project;
 pub mod recorder;
 pub mod schema;
+pub mod search;
 pub mod session;
