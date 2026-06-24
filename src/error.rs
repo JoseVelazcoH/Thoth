@@ -4,6 +4,8 @@ pub enum ThothError {
     Sqlite(#[from] rusqlite::Error),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    #[error("{0}")]
+    Hook(String),
 }
 
 #[cfg(test)]
@@ -21,5 +23,11 @@ mod tests {
         let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
         let err = ThothError::Io(io_err);
         assert!(err.to_string().starts_with("io:"));
+    }
+
+    #[test]
+    fn hook_variant_formats_message() {
+        let err = ThothError::Hook("could not write rc file".into());
+        assert_eq!(err.to_string(), "could not write rc file");
     }
 }
