@@ -1,5 +1,3 @@
-"""SQL schema definitions, one string per migration version."""
-
 SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS schema_version (
     version    INTEGER PRIMARY KEY,
@@ -48,7 +46,4 @@ END;
 CREATE TRIGGER IF NOT EXISTS commands_ad AFTER DELETE ON commands BEGIN
     INSERT INTO commands_fts(commands_fts, rowid, command) VALUES ('delete', old.id, old.command);
 END;
-
--- Resync after bulk changes:
--- INSERT INTO commands_fts(commands_fts) VALUES('rebuild');
 """

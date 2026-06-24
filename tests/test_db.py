@@ -19,9 +19,8 @@ def test_schema_created_from_empty():
     conn.close()
 
 
-
 def test_idempotent_rerun(mem_conn):
-    apply_migrations(mem_conn)  # second call
+    apply_migrations(mem_conn)
     rows = mem_conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0]
     assert rows == len([v for v, _ in MIGRATIONS])
 
@@ -73,16 +72,11 @@ def test_fts5_delete_sync(mem_conn):
 def test_fts5_unavailable_no_raise():
     conn = connect()
     with patch("tth.database.fts5_available", return_value=False):
-        apply_migrations(conn)  # should not raise
+        apply_migrations(conn)
     conn.close()
 
 
 def test_fts5_skip_does_not_record_version():
-    """When FTS5 is unavailable, schema_version must NOT contain version 2.
-
-    This allows migration 2 to be retried on a future startup when FTS5 becomes
-    available. Recording version=2 on skip would permanently suppress the retry.
-    """
     conn = connect()
     with patch("tth.database.fts5_available", return_value=False):
         apply_migrations(conn)
@@ -92,36 +86,28 @@ def test_fts5_skip_does_not_record_version():
 
 
 def test_fts5_skip_then_available_applies_migration():
-    """After a skipped FTS5 migration, a subsequent startup with FTS5 available applies it."""
     conn = connect()
-    # First startup: FTS5 unavailable -> skip
     with patch("tth.database.fts5_available", return_value=False):
         apply_migrations(conn)
     assert current_version(conn) == 1
 
-    # Second startup: FTS5 now available -> migration applies
     apply_migrations(conn)
     if not fts5_available(conn):
         import pytest
         pytest.skip("FTS5 not available in this build")
     assert current_version(conn) == 2
-    # commands_fts virtual table must exist
     tables = _table_names(conn)
     assert "commands_fts" in tables, "commands_fts not found after FTS5 migration"
     conn.close()
 
 
 def test_migration_is_atomic():
-    """A migration whose second statement is invalid must not advance schema_version."""
     conn = connect()
 
-    # First migration: valid — creates schema_version so current_version() works
     valid_v1 = (
         "CREATE TABLE IF NOT EXISTS schema_version "
         "(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);"
     )
-    # Second migration: first statement valid, second statement intentionally invalid.
-    # If atomicity is broken the table will be created but schema_version will be wrong.
     bad_v2 = (
         "CREATE TABLE IF NOT EXISTS partial_table (x INTEGER);"
         "THIS IS NOT VALID SQL;"
@@ -132,33 +118,22 @@ def test_migration_is_atomic():
         try:
             apply_migrations(conn)
         except Exception:
-            pass  # allowed to raise; what matters is the DB state
+            pass
 
-    # Schema version must NOT have advanced to 2 (atomicity failed → rollback)
     ver = current_version(conn)
-    assert ver != 2, f"schema_version advanced to {ver} despite bad SQL — migration is not atomic"
+    assert ver != 2, f"schema_version advanced to {ver} despite bad SQL - migration is not atomic"
 
-    # The partial DDL must also have been rolled back
     tables = _table_names(conn)
-    assert "partial_table" not in tables, "partial_table exists after failed migration — DDL was not rolled back"
+    assert "partial_table" not in tables, "partial_table exists after failed migration - DDL was not rolled back"
 
     conn.close()
 
 
 def test_trigger_with_case_end_splits_correctly():
-    """_split_sql must not confuse CASE...END with BEGIN...END trigger nesting.
-
-    A trigger body that contains CASE WHEN ... THEN ... ELSE ... END must be
-    recognised as a single statement and applied without error.  The old depth-
-    counter matched any END keyword, so the CASE END prematurely closed the
-    trigger's BEGIN...END block and the trigger DDL was silently split wrong.
-    """
     conn = connect()
 
-    # Migration 1 creates schema_version + the base commands table we need.
     apply_migrations(conn)
 
-    # A second migration adds a trigger whose body uses CASE WHEN ... END.
     trigger_sql = """
 CREATE TABLE IF NOT EXISTS audit_log (
     id    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -178,15 +153,13 @@ END;
     from unittest.mock import patch
     fake_migrations = list(MIGRATIONS) + [(99, trigger_sql)]
     with patch("tth.database.MIGRATIONS", fake_migrations):
-        apply_migrations(conn)  # must not raise
+        apply_migrations(conn)
 
-    # The trigger must exist.
     row = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='trigger' AND name='commands_audit'"
     ).fetchone()
-    assert row is not None, "trigger commands_audit was not created — CASE END split the body"
+    assert row is not None, "trigger commands_audit was not created - CASE END split the body"
 
-    # Insert a row to exercise the trigger.
     conn.execute(
         "INSERT INTO commands(command, directory, project, session_id, timestamp, exit_code, duration_ms, tags) "
         "VALUES('ls', '/tmp', 'p', 'sid', 1700000000, 0, 1, '[]')"
@@ -199,17 +172,9 @@ END;
 
 
 def test_string_literal_with_semicolon_begin_and_comment():
-    """A statement containing an embedded ';', 'BEGIN', and '--' in a string
-    literal must be treated as ONE statement, not split in the middle.
-
-    The old splitter stripped '--' via line.split('--')[0], which would
-    truncate any string value containing that sequence, and it didn't track
-    quote state, so a bare ';' inside quotes would incorrectly end the statement.
-    """
     conn = connect()
     apply_migrations(conn)
 
-    # A migration that inserts a row with tricky text in a string literal.
     tricky_value = "hello; BEGIN -- not a comment"
     literal_sql = (
         "CREATE TABLE IF NOT EXISTS string_test (val TEXT NOT NULL);\n"
@@ -218,7 +183,7 @@ def test_string_literal_with_semicolon_begin_and_comment():
     from unittest.mock import patch
     fake_migrations = list(MIGRATIONS) + [(98, literal_sql)]
     with patch("tth.database.MIGRATIONS", fake_migrations):
-        apply_migrations(conn)  # must not raise
+        apply_migrations(conn)
 
     row = conn.execute("SELECT val FROM string_test").fetchone()
     assert row is not None, "string_test row was not inserted"

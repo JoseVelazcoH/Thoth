@@ -1,12 +1,7 @@
-"""Tests for env/XDG path resolution (Commit 3)."""
-
-import os
 from pathlib import Path
-from unittest.mock import patch
 
 
 def test_thoth_db_env_override(tmp_path, monkeypatch):
-    """THOTH_DB env var must override the default DB path."""
     from tth import database
 
     custom = str(tmp_path / "custom.db")
@@ -16,7 +11,6 @@ def test_thoth_db_env_override(tmp_path, monkeypatch):
 
 
 def test_thoth_db_xdg_data_home(tmp_path, monkeypatch):
-    """XDG_DATA_HOME must be used when THOTH_DB is unset."""
     from tth import database
 
     monkeypatch.delenv("THOTH_DB", raising=False)
@@ -26,7 +20,6 @@ def test_thoth_db_xdg_data_home(tmp_path, monkeypatch):
 
 
 def test_thoth_db_fallback(monkeypatch):
-    """Fallback to ~/.local/share/thoth/history.db when both env vars unset."""
     from tth import database
 
     monkeypatch.delenv("THOTH_DB", raising=False)
@@ -36,7 +29,6 @@ def test_thoth_db_fallback(monkeypatch):
 
 
 def test_thoth_error_log_env_override(tmp_path, monkeypatch):
-    """THOTH_ERROR_LOG env var must override the default error log path."""
     from tth import recorder
 
     custom = str(tmp_path / "custom.log")
@@ -46,7 +38,6 @@ def test_thoth_error_log_env_override(tmp_path, monkeypatch):
 
 
 def test_thoth_error_log_xdg(tmp_path, monkeypatch):
-    """XDG_DATA_HOME must be used for error log when THOTH_ERROR_LOG unset."""
     from tth import recorder
 
     monkeypatch.delenv("THOTH_ERROR_LOG", raising=False)
@@ -56,7 +47,6 @@ def test_thoth_error_log_xdg(tmp_path, monkeypatch):
 
 
 def test_thoth_error_log_fallback(monkeypatch):
-    """Fallback to ~/.local/share/thoth/error.log when both env vars unset."""
     from tth import recorder
 
     monkeypatch.delenv("THOTH_ERROR_LOG", raising=False)

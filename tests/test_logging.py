@@ -1,23 +1,15 @@
-"""Tests for Thoth log routing and rotation (Commit 9)."""
-
 import logging
-import sys
-from pathlib import Path
 from unittest.mock import patch
 
 
 def test_fts5_warning_does_not_reach_stderr(tmp_path, monkeypatch, capsys):
-    """FTS5 unavailable warning must not appear on stderr."""
     import tth.database as db_mod
 
     log_file = tmp_path / "error.log"
     monkeypatch.setenv("THOTH_ERROR_LOG", str(log_file))
 
-    # Re-configure logging so the thoth logger is set up fresh.
     from tth import logging_config
     logging_config.setup(log_file)
-
-    db_logger = logging.getLogger("tth.database")
 
     with patch.object(db_mod, "fts5_available", return_value=False):
         from tth.database import connect, apply_migrations
@@ -32,7 +24,6 @@ def test_fts5_warning_does_not_reach_stderr(tmp_path, monkeypatch, capsys):
 
 
 def test_warning_goes_to_log_file(tmp_path):
-    """A warning emitted by the thoth logger must appear in the log file."""
     log_file = tmp_path / "warn.log"
     from tth import logging_config
     logging_config.setup(log_file)
@@ -40,7 +31,6 @@ def test_warning_goes_to_log_file(tmp_path):
     logger = logging.getLogger("tth.test_warning_routing")
     logger.warning("sentinel-warning-xyz")
 
-    # Flush handlers
     for h in logging.getLogger("tth").handlers:
         h.flush()
 
@@ -50,7 +40,6 @@ def test_warning_goes_to_log_file(tmp_path):
 
 
 def test_log_rotation_bounds_file_size(tmp_path):
-    """After many writes the log file must stay bounded (rotation kicks in)."""
     log_file = tmp_path / "rotate.log"
     from tth import logging_config
 
@@ -59,7 +48,7 @@ def test_log_rotation_bounds_file_size(tmp_path):
 
     logger = logging.getLogger("tth.rotation_test")
     line = "x" * 200
-    for _ in range(200):  # 200 * 200 = 40 000 bytes >> 10 000 limit
+    for _ in range(200):
         logger.warning(line)
 
     for h in logging.getLogger("tth").handlers:

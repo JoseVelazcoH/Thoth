@@ -1,16 +1,9 @@
-"""Tests for project inference (Domain 2)."""
-
 import json
 import time
 from unittest.mock import patch
 
 
 from tth.project import infer_project, _walk_markers
-
-
-# ---------------------------------------------------------------------------
-# Marker detection tests
-# ---------------------------------------------------------------------------
 
 
 def test_git_marker(tmp_path):
@@ -78,7 +71,6 @@ def test_fallback_ungrouped(tmp_path):
 
 
 def test_depth_cap(tmp_path):
-    """Walk must stop at 20 levels and return 'ungrouped', no error."""
     deep = tmp_path
     for i in range(25):
         deep = deep / f"level{i}"
@@ -87,13 +79,7 @@ def test_depth_cap(tmp_path):
     assert result == "ungrouped"
 
 
-# ---------------------------------------------------------------------------
-# Cache tests (use mem_conn fixture from conftest)
-# ---------------------------------------------------------------------------
-
-
 def test_cache_hit(mem_conn, tmp_path):
-    """Cache hit: last_seen < 24h ago -> no FS walk."""
     project_dir = str(tmp_path / "cached-app")
     now = int(time.time())
     one_hour_ago = now - 3600
@@ -110,7 +96,6 @@ def test_cache_hit(mem_conn, tmp_path):
 
 
 def test_cache_miss_stale(mem_conn, tmp_path):
-    """Stale cache (>24h): must re-walk."""
     project_dir = tmp_path / "stale-app"
     project_dir.mkdir()
     (project_dir / "pyproject.toml").write_text('[project]\nname = "fresh-name"\n')
@@ -128,7 +113,6 @@ def test_cache_miss_stale(mem_conn, tmp_path):
 
 
 def test_stale_cache_triggers_rewalk(mem_conn, tmp_path):
-    """A stale cache entry (>24h) must cause infer_project to re-walk the filesystem."""
     import time
 
     from tth.project import infer_project
@@ -151,7 +135,6 @@ def test_stale_cache_triggers_rewalk(mem_conn, tmp_path):
 
 
 def test_recorder_upsert_increments_command_count(mem_conn, tmp_path):
-    """The recorder upsert must increment command_count and never reset it."""
     import time
 
     from tth.recorder import _record_inner
@@ -188,10 +171,8 @@ def test_recorder_upsert_increments_command_count(mem_conn, tmp_path):
 
 
 def test_malformed_pyproject_continues(tmp_path):
-    """Invalid TOML in pyproject.toml -> no raise, return ungrouped (no parent markers)."""
     project_dir = tmp_path / "broken"
     project_dir.mkdir()
     (project_dir / "pyproject.toml").write_text("this is not toml [[[\n")
     result = _walk_markers(str(project_dir))
-    # Malformed -> skip, no other markers, fallback
     assert result == "ungrouped"

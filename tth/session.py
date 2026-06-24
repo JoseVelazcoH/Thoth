@@ -1,5 +1,3 @@
-"""Work-session grouping: get or create a session UUID."""
-
 import sqlite3
 import uuid
 
@@ -9,11 +7,6 @@ _GAP_SECONDS = SESSION_GAP_MINUTES * 60
 
 
 def get_or_create(project: str, timestamp: int, conn: sqlite3.Connection) -> str:
-    """Return existing session_id or create a new one.
-
-    Transaction-agnostic: caller must own the surrounding transaction.
-    Rules: new session if no prior session, gap > 30 min, or project differs.
-    """
     row = conn.execute(
         "SELECT session_id, project, ended_at FROM sessions ORDER BY ended_at DESC LIMIT 1"
     ).fetchone()

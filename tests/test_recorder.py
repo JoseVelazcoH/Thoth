@@ -1,16 +1,9 @@
-"""Tests for recorder core (Domain 4)."""
-
 import sqlite3
 import time
 from unittest.mock import patch
 
 
 from tth.recorder import record, _record_inner, _normalize_tags
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _insert_project(conn, path, name="app", count=0):
@@ -20,11 +13,6 @@ def _insert_project(conn, path, name="app", count=0):
         (path, name, now, count),
     )
     conn.commit()
-
-
-# ---------------------------------------------------------------------------
-# Core record tests
-# ---------------------------------------------------------------------------
 
 
 def test_successful_record(mem_conn, tmp_path):
@@ -44,7 +32,6 @@ def test_successful_record(mem_conn, tmp_path):
     assert row["tags"] == "[]"
     assert row["project"] is not None
     assert row["session_id"] is not None
-
 
 
 def test_projects_upsert_increments_count(mem_conn, tmp_path):
@@ -83,7 +70,6 @@ def test_exception_logged_not_raised(mem_conn, tmp_path, tmp_path_factory):
     assert "boom" in log_file.read_text()
 
 
-
 def test_sqlite_lock_both_fail_logs(mem_conn, tmp_path, tmp_path_factory):
     log_dir = tmp_path_factory.mktemp("logs2")
     log_file = log_dir / "error.log"
@@ -100,11 +86,6 @@ def test_sqlite_lock_both_fail_logs(mem_conn, tmp_path, tmp_path_factory):
     content = log_file.read_text()
     assert content, "Error log must not be empty when both attempts fail"
     assert "locked" in content, f"Expected error text in log, got: {content!r}"
-
-
-# ---------------------------------------------------------------------------
-# _normalize_tags unit tests
-# ---------------------------------------------------------------------------
 
 
 def test_normalize_tags_valid():
@@ -137,17 +118,6 @@ def test_normalize_tags_valid_strings_preserved_verbatim():
 
 
 def test_retry_runs_on_clean_transaction(mem_conn, tmp_path):
-    """record() must rollback before retrying so the second attempt starts
-    on a clean connection — not inside the dirty transaction left by the
-    first failure.
-
-    Assertions:
-    (a) No exception escapes record().
-    (b) The command is recorded exactly once (no duplicate/missing rows).
-    (c) The retry itself succeeds without "cannot start a transaction within
-        a transaction" errors (which would surface as an exception in the
-        second _record_inner call and cause a log-but-no-row outcome).
-    """
     t0 = int(time.time())
     call_count = 0
     original_record_inner = _record_inner
@@ -156,30 +126,21 @@ def test_retry_runs_on_clean_transaction(mem_conn, tmp_path):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            # Simulate a lock error; leave the connection in a dirty state
-            # by issuing a partial statement before raising, the way a real
-            # lock failure might.
             raise sqlite3.OperationalError("database is locked")
-        # Second call: must succeed on a clean connection.
         original_record_inner(command, directory, exit_code, duration_ms, timestamp, tags_json, conn)
 
     with patch("tth.recorder._record_inner", side_effect=_failing_first_then_ok):
-        # (a) must not raise
         record("retry-cmd", str(tmp_path), 0, 0, t0, "[]", mem_conn)
 
-    # (b) exactly one row recorded
     rows = mem_conn.execute(
         "SELECT COUNT(*) FROM commands WHERE command='retry-cmd'"
     ).fetchone()[0]
     assert rows == 1, f"Expected 1 row, got {rows}"
 
-    # (c) call_count == 2 confirms the retry ran
     assert call_count == 2, f"Expected 2 calls (original + retry), got {call_count}"
 
 
 class _FailOnCommandInsert:
-    """Wrapper that raises on the commands INSERT but delegates everything else."""
-
     def __init__(self, real_conn, *, fail_count=1):
         self._conn = real_conn
         self._fail_count = fail_count
@@ -201,23 +162,18 @@ class _FailOnCommandInsert:
     def close(self):
         return self._conn.close()
 
-    # Forward attribute access for row_factory etc.
     def __getattr__(self, name):
         return getattr(self._conn, name)
 
 
 def test_atomicity_command_failure_leaves_no_session(mem_conn, tmp_path):
-    """If the command INSERT fails, _record_inner rolls back the whole transaction.
-
-    No orphan session row must survive; the post-rollback state must be clean.
-    """
     t0 = int(time.time())
     failing_conn = _FailOnCommandInsert(mem_conn, fail_count=1)
 
     try:
         _record_inner("atomicity-test", str(tmp_path), 0, 0, t0, "[]", failing_conn)
     except Exception:
-        pass  # expected to raise; we check DB state next
+        pass
 
     sessions = mem_conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
     commands = mem_conn.execute(
@@ -228,7 +184,6 @@ def test_atomicity_command_failure_leaves_no_session(mem_conn, tmp_path):
 
 
 def test_atomicity_retry_produces_exactly_one_row(mem_conn, tmp_path, tmp_path_factory):
-    """After a failed first attempt, record()'s retry produces exactly 1 session + 1 command."""
     log_dir = tmp_path_factory.mktemp("atom_logs")
     log_file = log_dir / "error.log"
     t0 = int(time.time())

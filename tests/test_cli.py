@@ -1,5 +1,3 @@
-"""CLI integration tests for `tth record` (Domain 4)."""
-
 import os
 import sqlite3
 import sys
@@ -18,7 +16,6 @@ def _make_conn(db_path):
 
 @pytest.fixture
 def temp_db(tmp_path, monkeypatch):
-    """Provide a temp DB path and monkeypatch get_connection to use it."""
     db_path = tmp_path / "test.db"
 
     def _patched_get_connection(path=None):
@@ -29,7 +26,6 @@ def temp_db(tmp_path, monkeypatch):
 
 
 def _invoke(argv):
-    """Call cli.main() and return (exit_code, raised_exception)."""
     from tth import cli
     try:
         cli.main(argv)
@@ -41,8 +37,6 @@ def _invoke(argv):
 
 
 def test_typer_not_imported():
-    """After importing tth.cli, typer and click must NOT be in sys.modules."""
-    # Force a fresh import by removing cached modules if present.
     for mod in list(sys.modules.keys()):
         if mod == "tth.cli" or mod.startswith("typer") or mod.startswith("click"):
             del sys.modules[mod]
@@ -52,7 +46,6 @@ def test_typer_not_imported():
 
 
 def test_cli_exits_0_on_failure(monkeypatch, tmp_path_factory):
-    """Even if get_connection raises, CLI must exit 0."""
     log_dir = tmp_path_factory.mktemp("cli_fail_log")
     log_file = log_dir / "error.log"
 
@@ -67,7 +60,6 @@ def test_cli_exits_0_on_failure(monkeypatch, tmp_path_factory):
 
 
 def test_setup_failure_logs_and_exits_0(monkeypatch, tmp_path_factory):
-    """get_connection() raising must log the error AND keep exit code 0."""
     log_dir = tmp_path_factory.mktemp("setup_fail_logs")
     log_file = log_dir / "error.log"
 
@@ -107,7 +99,6 @@ def test_cli_all_six_flags(temp_db):
 
 
 def test_cli_default_dir_is_cwd(temp_db, monkeypatch, tmp_path):
-    """Omitting --dir should store the real cwd as directory (hermetic, no /tmp)."""
     monkeypatch.chdir(tmp_path)
     code, exc = _invoke(["record", "--cmd", "pwd"])
     assert code == 0, f"Exit {code}, exc={exc}"

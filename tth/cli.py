@@ -1,10 +1,3 @@
-"""Entry point for the `tth` command using stdlib argparse.
-
-The `record` subcommand runs on every shell hook and must stay typer/click-free
-so import overhead stays near the stdlib baseline (~40ms). Future human-facing
-commands (search, stats) can lazy-import a Typer app inside their own branch.
-"""
-
 import argparse
 import os
 import sys

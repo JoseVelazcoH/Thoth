@@ -1,5 +1,3 @@
-"""Project inference: walk directory markers, 24-hour cache."""
-
 import json
 import sqlite3
 import time
@@ -7,12 +5,11 @@ import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
-_CACHE_TTL_SECONDS = 86400  # 24 hours
+_CACHE_TTL_SECONDS = 86400
 _MAX_WALK_DEPTH = 20
 
 
 def infer_project(cwd: str, conn: sqlite3.Connection) -> str:
-    """Return project name for cwd. Uses 24h cache; miss triggers FS walk."""
     now = int(time.time())
     cutoff = now - _CACHE_TTL_SECONDS
 
@@ -26,9 +23,7 @@ def infer_project(cwd: str, conn: sqlite3.Connection) -> str:
     return _walk_markers(cwd) or "ungrouped"
 
 
-
 def _read_nested(data: dict, *keys: str) -> str | None:
-    """Walk a chain of dict keys; return the string value or None."""
     node = data
     for key in keys:
         if not isinstance(node, dict):
@@ -38,7 +33,6 @@ def _read_nested(data: dict, *keys: str) -> str | None:
 
 
 def _load_toml(p: Path) -> dict | None:
-    """Parse a TOML file; return the data dict or None on any error."""
     try:
         return tomllib.loads(p.read_text(encoding="utf-8"))
     except Exception:
@@ -46,7 +40,6 @@ def _load_toml(p: Path) -> dict | None:
 
 
 def _load_json(p: Path) -> dict | None:
-    """Parse a JSON file; return the data dict or None on any error."""
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else None
@@ -83,9 +76,8 @@ def _extract_gomod(p: Path) -> str | None:
         return None
 
 
-# Each entry is (filename, extractor). Directory-name markers use is_dir() check below.
 _MARKER_STRATEGIES: list[tuple[str, Callable[[Path], str | None]]] = [
-    (".git", lambda p: p.parent.name),          # directory marker: use is_dir() check below
+    (".git", lambda p: p.parent.name),
     ("package.json", _extract_package_json),
     ("pyproject.toml", _extract_pyproject),
     ("Cargo.toml", _extract_cargo),
@@ -94,13 +86,10 @@ _MARKER_STRATEGIES: list[tuple[str, Callable[[Path], str | None]]] = [
     ("compose.yml", lambda p: p.parent.name),
 ]
 
-# Filenames that must exist as directories, not regular files.
 _DIR_MARKERS = {".git"}
 
 
-
 def _walk_markers(cwd: str) -> str:
-    """Walk up <=20 directory levels checking project markers. Returns name or 'ungrouped'."""
     current = Path(cwd).resolve()
     for _ in range(_MAX_WALK_DEPTH):
         name = _check_markers(current)
@@ -114,7 +103,6 @@ def _walk_markers(cwd: str) -> str:
 
 
 def _check_markers(directory: Path) -> str | None:
-    """Check a single directory for project markers in priority order."""
     for filename, extractor in _MARKER_STRATEGIES:
         candidate = directory / filename
         if filename in _DIR_MARKERS:
