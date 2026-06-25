@@ -74,7 +74,12 @@ STUB
         _THOTH_CMD='echo hello'
         _THOTH_START=\$EPOCHREALTIME
         _thoth_precmd
-        wait
+        _i=0
+        while (( _i < 100 )); do
+            [[ -s '$stub_log' ]] && break
+            sleep 0.05
+            _i=\$(( _i + 1 ))
+        done
     " || true
 
     local all_ok=1
