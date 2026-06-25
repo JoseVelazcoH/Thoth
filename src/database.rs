@@ -44,8 +44,8 @@ pub fn get_connection(path: Option<&Path>) -> Result<Connection, ThothError> {
         std::fs::create_dir_all(parent)?;
     }
 
-    let mut last_err: Option<rusqlite::Error> = None;
-    for attempt in 0..WAL_SETUP_RETRIES {
+    let mut attempt: u32 = 0;
+    loop {
         let open_result = (|| -> Result<Connection, rusqlite::Error> {
             let conn = Connection::open(&db_path)?;
             conn.busy_timeout(Duration::from_millis(u64::from(BUSY_TIMEOUT_MS)))?;
@@ -60,15 +60,15 @@ pub fn get_connection(path: Option<&Path>) -> Result<Connection, ThothError> {
         match thoth_result {
             Ok(c) => return Ok(c),
             Err(ThothError::Sqlite(sqlite_err)) if is_transient_lock(&sqlite_err) => {
-                last_err = Some(sqlite_err);
-                if attempt + 1 < WAL_SETUP_RETRIES {
-                    std::thread::sleep(Duration::from_millis(WAL_SETUP_SLEEP_MS));
+                attempt += 1;
+                if attempt >= WAL_SETUP_RETRIES {
+                    return Err(ThothError::from(sqlite_err));
                 }
+                std::thread::sleep(Duration::from_millis(WAL_SETUP_SLEEP_MS));
             }
             Err(e) => return Err(e),
         }
     }
-    Err(ThothError::from(last_err.unwrap()))
 }
 
 pub fn current_version(conn: &Connection) -> i64 {
