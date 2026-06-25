@@ -21,7 +21,7 @@ _tth_precmd() {
         --duration "$_dur" \
         --timestamp "$EPOCHSECONDS" \
         --tags "${TTH_ACTIVE_TAGS:-[]}" \
-        --terminal-id "$TTH_SESSION_ID" &
+        --terminal-id "$TTH_SESSION_ID" &!
     _TTH_CMD=""
 }
 
