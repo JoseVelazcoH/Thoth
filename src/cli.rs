@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser)]
 #[command(name = "tth")]
@@ -14,6 +15,7 @@ pub enum Cmd {
     Install(InstallArgs),
     Uninstall(UninstallArgs),
     Status,
+    Search(SearchArgs),
     #[command(hide = true)]
     NewSessionId,
 }
@@ -42,6 +44,29 @@ pub struct InstallArgs {
     pub shell: Option<String>,
     #[arg(long = "rc-file")]
     pub rc_file: Option<PathBuf>,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct SearchArgs {
+    pub query: Option<String>,
+    #[arg(short = 'p', long)]
+    pub project: Option<String>,
+    #[arg(short = 't', long, action = clap::ArgAction::Append)]
+    pub tag: Vec<String>,
+    #[arg(long)]
+    pub exit: Option<crate::search::ExitFilter>,
+    #[arg(long)]
+    pub duration: Option<String>,
+    #[arg(long)]
+    pub since: Option<String>,
+    #[arg(long)]
+    pub until: Option<String>,
+    #[arg(long)]
+    pub session: Option<String>,
+    #[arg(long, default_value_t = 50)]
+    pub limit: usize,
+    #[arg(long = "show-session", default_value_t = false)]
+    pub show_session: bool,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -135,6 +160,15 @@ pub fn run() -> Result<(), crate::error::ThothError> {
             );
             println!("Session ID set:   {}", report.session_id_set);
             println!("tth on PATH:      {}", report.tth_on_path);
+        }
+        Cmd::Search(args) => {
+            let conn = crate::database::get_connection(None)?;
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            let rows = crate::search::execute(&args, &conn, now)?;
+            print!("{}", crate::search::render(&rows, args.show_session));
         }
         Cmd::NewSessionId => {
             println!("{}", uuid::Uuid::new_v4());

@@ -6,6 +6,8 @@ pub enum ThothError {
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Hook(String),
+    #[error("{0}")]
+    Search(String),
 }
 
 #[cfg(test)]
@@ -29,5 +31,11 @@ mod tests {
     fn hook_variant_formats_message() {
         let err = ThothError::Hook("could not write rc file".into());
         assert_eq!(err.to_string(), "could not write rc file");
+    }
+
+    #[test]
+    fn search_variant_delegates_to_inner_string() {
+        let err = ThothError::Search("bad input".into());
+        assert_eq!(err.to_string(), "bad input");
     }
 }
