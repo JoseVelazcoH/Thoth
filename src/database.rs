@@ -1,10 +1,26 @@
 use crate::error::ThothError;
 use crate::schema::{SCHEMA_V1, SCHEMA_V2_FTS, SCHEMA_V3_TERMINAL_ID};
-use rusqlite::{Connection, TransactionBehavior};
+use rusqlite::{Connection, ErrorCode, TransactionBehavior};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const BUSY_TIMEOUT_MS: u32 = 2000;
+
+const WAL_SETUP_RETRIES: u32 = 40;
+const WAL_SETUP_SLEEP_MS: u64 = 5;
+
+fn is_transient_lock(e: &rusqlite::Error) -> bool {
+    matches!(
+        e,
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: ErrorCode::DatabaseLocked | ErrorCode::DatabaseBusy,
+                ..
+            },
+            _
+        )
+    )
+}
 
 pub const MIGRATIONS: &[(i64, &str)] = &[
     (1, SCHEMA_V1),
@@ -28,12 +44,31 @@ pub fn get_connection(path: Option<&Path>) -> Result<Connection, ThothError> {
         std::fs::create_dir_all(parent)?;
     }
 
-    let mut conn = Connection::open(&db_path)?;
-    conn.execute_batch(&format!(
-        "PRAGMA journal_mode=WAL; PRAGMA busy_timeout={BUSY_TIMEOUT_MS}; PRAGMA synchronous=NORMAL;"
-    ))?;
-    apply_migrations(&mut conn)?;
-    Ok(conn)
+    let mut last_err: Option<rusqlite::Error> = None;
+    for attempt in 0..WAL_SETUP_RETRIES {
+        let open_result = (|| -> Result<Connection, rusqlite::Error> {
+            let conn = Connection::open(&db_path)?;
+            conn.busy_timeout(Duration::from_millis(u64::from(BUSY_TIMEOUT_MS)))?;
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+            Ok(conn)
+        })();
+
+        let thoth_result: Result<Connection, ThothError> = open_result
+            .map_err(ThothError::from)
+            .and_then(|mut c| apply_migrations(&mut c).map(|()| c));
+
+        match thoth_result {
+            Ok(c) => return Ok(c),
+            Err(ThothError::Sqlite(sqlite_err)) if is_transient_lock(&sqlite_err) => {
+                last_err = Some(sqlite_err);
+                if attempt + 1 < WAL_SETUP_RETRIES {
+                    std::thread::sleep(Duration::from_millis(WAL_SETUP_SLEEP_MS));
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(ThothError::from(last_err.unwrap()))
 }
 
 pub fn current_version(conn: &Connection) -> i64 {
@@ -314,21 +349,12 @@ mod tests {
         use std::thread;
         use tempfile::TempDir;
 
-        const THREADS: usize = 12;
-        const ROUNDS: usize = 3;
+        const THREADS: usize = 16;
+        const ROUNDS: usize = 8;
 
         for _round in 0..ROUNDS {
             let dir = TempDir::new().unwrap();
             let db_path = Arc::new(dir.path().join("history.db"));
-
-            {
-                let init = Connection::open(db_path.as_ref()).unwrap();
-                init.execute_batch(&format!(
-                    "PRAGMA journal_mode=WAL; PRAGMA busy_timeout={};",
-                    BUSY_TIMEOUT_MS * 5
-                ))
-                .unwrap();
-            }
 
             let barrier = Arc::new(Barrier::new(THREADS));
             let errors: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
