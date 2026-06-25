@@ -3,7 +3,7 @@ use crate::error::ThothError;
 use crate::logging::log_error;
 use crate::project::infer_project;
 use crate::session::get_or_create;
-use rusqlite::Connection;
+use rusqlite::{Connection, TransactionBehavior};
 
 pub fn normalize_tags(raw: &str) -> String {
     if raw.is_empty() {
@@ -36,7 +36,7 @@ pub fn record_inner(args: &RecordArgs, conn: &mut Connection) -> Result<(), Thot
             .as_secs() as i64
     });
 
-    let tx = conn.transaction()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
     let project = infer_project(&directory, &tx)?;
     let sid = get_or_create(&project, timestamp, &tx)?;

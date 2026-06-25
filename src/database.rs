@@ -1,6 +1,6 @@
 use crate::error::ThothError;
 use crate::schema::{SCHEMA_V1, SCHEMA_V2_FTS, SCHEMA_V3_TERMINAL_ID};
-use rusqlite::Connection;
+use rusqlite::{Connection, TransactionBehavior};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -51,13 +51,7 @@ pub fn fts5_available(conn: &Connection) -> bool {
 }
 
 pub fn apply_migrations(conn: &mut Connection) -> Result<(), ThothError> {
-    let ver = current_version(conn);
-
     for &(version, sql) in MIGRATIONS {
-        if version <= ver {
-            continue;
-        }
-
         if version == 2 && !fts5_available(conn) {
             continue;
         }
@@ -67,7 +61,21 @@ pub fn apply_migrations(conn: &mut Connection) -> Result<(), ThothError> {
             .unwrap_or_default()
             .as_secs() as i64;
 
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        let ver_now = tx
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0_i64);
+
+        if version <= ver_now {
+            tx.rollback()?;
+            continue;
+        }
+
         tx.execute_batch(sql)?;
         tx.execute(
             "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(?1, ?2)",
@@ -298,6 +306,91 @@ mod tests {
         drop(tx);
         let ver_after = current_version(&conn);
         assert_eq!(ver_before, ver_after);
+    }
+
+    #[test]
+    fn concurrent_migrations_no_race() {
+        use std::sync::{Arc, Barrier, Mutex};
+        use std::thread;
+        use tempfile::TempDir;
+
+        const THREADS: usize = 12;
+        const ROUNDS: usize = 3;
+
+        for _round in 0..ROUNDS {
+            let dir = TempDir::new().unwrap();
+            let db_path = Arc::new(dir.path().join("history.db"));
+
+            {
+                let init = Connection::open(db_path.as_ref()).unwrap();
+                init.execute_batch(&format!(
+                    "PRAGMA journal_mode=WAL; PRAGMA busy_timeout={};",
+                    BUSY_TIMEOUT_MS * 5
+                ))
+                .unwrap();
+            }
+
+            let barrier = Arc::new(Barrier::new(THREADS));
+            let errors: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+
+            let handles: Vec<_> = (0..THREADS)
+                .map(|i| {
+                    let path = Arc::clone(&db_path);
+                    let errs = Arc::clone(&errors);
+                    let bar = Arc::clone(&barrier);
+                    thread::spawn(move || {
+                        bar.wait();
+                        let result = get_connection(Some(&path));
+                        match result {
+                            Ok(conn) => {
+                                let ts = 1700000000_i64 + i as i64;
+                                let res = conn.execute(
+                                    "INSERT INTO commands(command, directory, project, session_id, timestamp) \
+                                     VALUES(?1, '/tmp', 'p', 's1', ?2)",
+                                    rusqlite::params![format!("cmd-{i}"), ts],
+                                );
+                                if let Err(e) = res {
+                                    errs.lock().unwrap().push(format!("thread {i} insert: {e}"));
+                                }
+                            }
+                            Err(e) => {
+                                errs.lock()
+                                    .unwrap()
+                                    .push(format!("thread {i} connect: {e}"));
+                            }
+                        }
+                    })
+                })
+                .collect();
+
+            for h in handles {
+                h.join().unwrap();
+            }
+
+            let errs = errors.lock().unwrap();
+            assert!(
+                errs.is_empty(),
+                "round {_round}: concurrent migration errors: {errs:?}"
+            );
+
+            let conn = Connection::open(db_path.as_ref()).unwrap();
+            let ver: i64 = conn
+                .query_row(
+                    "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(ver, 3, "round {_round}: schema not at final version");
+
+            let count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(
+                count, THREADS as i64,
+                "round {_round}: expected {THREADS} rows, got {count}"
+            );
+        }
     }
 
     #[test]
