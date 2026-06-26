@@ -86,7 +86,14 @@ pub fn fts5_available(conn: &Connection) -> bool {
 }
 
 pub fn apply_migrations(conn: &mut Connection) -> Result<(), ThothError> {
-    for &(version, sql) in MIGRATIONS {
+    apply_migration_list(conn, MIGRATIONS)
+}
+
+fn apply_migration_list(
+    conn: &mut Connection,
+    migrations: &[(i64, &str)],
+) -> Result<(), ThothError> {
+    for &(version, sql) in migrations {
         if version == 2 && !fts5_available(conn) {
             continue;
         }
@@ -315,38 +322,16 @@ mod tests {
 
     #[test]
     fn atomicity_rollback_on_bad_migration() {
-        const BAD_VERSION: i64 = 99;
-        const BAD_SQL: &str = "THIS IS NOT VALID SQL;";
+        const BAD_MIGRATION: &[(i64, &str)] = &[(
+            99,
+            "CREATE TABLE should_not_exist(x);\nTHIS IS NOT VALID SQL;",
+        )];
 
         let mut conn = connect_memory().unwrap();
         apply_migrations(&mut conn).unwrap();
         let ver_before = current_version(&conn);
 
-        let result = (|| -> Result<(), ThothError> {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64;
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            let ver_now: i64 = tx
-                .query_row(
-                    "SELECT COALESCE(MAX(version), 0) FROM schema_version",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-            if BAD_VERSION <= ver_now {
-                tx.rollback()?;
-                return Ok(());
-            }
-            tx.execute_batch(BAD_SQL)?;
-            tx.execute(
-                "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(?1, ?2)",
-                rusqlite::params![BAD_VERSION, now],
-            )?;
-            tx.commit()?;
-            Ok(())
-        })();
+        let result = apply_migration_list(&mut conn, BAD_MIGRATION);
 
         assert!(result.is_err(), "bad migration SQL must return an error");
         let ver_after = current_version(&conn);
