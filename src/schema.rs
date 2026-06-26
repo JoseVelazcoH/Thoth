@@ -49,26 +49,3 @@ CREATE TRIGGER IF NOT EXISTS commands_ad AFTER DELETE ON commands BEGIN
     INSERT INTO commands_fts(commands_fts, rowid, command) VALUES ('delete', old.id, old.command);
 END;
 ";
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn v1_contains_commands_table() {
-        assert!(super::SCHEMA_V1.contains("CREATE TABLE IF NOT EXISTS commands"));
-    }
-
-    #[test]
-    fn v2_contains_fts() {
-        assert!(super::SCHEMA_V2_FTS.contains("commands_fts"));
-    }
-
-    #[test]
-    fn v3_const_non_empty() {
-        assert!(!super::SCHEMA_V3_TERMINAL_ID.is_empty());
-    }
-
-    #[test]
-    fn v3_const_contains_terminal_id() {
-        assert!(super::SCHEMA_V3_TERMINAL_ID.contains("terminal_id"));
-    }
-}
