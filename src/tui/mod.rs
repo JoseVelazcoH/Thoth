@@ -1,10 +1,13 @@
+pub mod app;
+pub mod event;
+pub mod fuzzy;
 pub mod time;
 
 use std::fs::OpenOptions;
 use std::panic;
 
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
+    event::{self as ct_event, Event},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -17,6 +20,8 @@ use ratatui::{
 use rusqlite::Connection;
 
 use crate::error::ThothError;
+use crate::tui::app::App;
+use crate::tui::event::{handle_key, Outcome};
 
 struct TerminalGuard;
 
@@ -47,7 +52,7 @@ fn history_count(conn: &Connection) -> i64 {
         .unwrap_or(0)
 }
 
-pub fn run(conn: &Connection, _now: i64) -> Result<(), ThothError> {
+pub fn run(conn: &Connection, now: i64) -> Result<(), ThothError> {
     let tty = OpenOptions::new()
         .read(true)
         .write(true)
@@ -69,9 +74,14 @@ pub fn run(conn: &Connection, _now: i64) -> Result<(), ThothError> {
     let mut terminal = Terminal::new(backend)
         .map_err(|e| ThothError::Tui(format!("terminal init failed: {e}")))?;
 
+    let mut app = App::new();
+    app.reload(conn, now)?;
+
     let count = history_count(conn);
 
     loop {
+        let query = app.query.clone();
+        let result_count = app.filtered.len();
         terminal
             .draw(|f| {
                 let area = f.area();
@@ -84,25 +94,32 @@ pub fn run(conn: &Connection, _now: i64) -> Result<(), ThothError> {
                 let inner = block.inner(chunks[0]);
                 f.render_widget(block, chunks[0]);
 
-                let body =
-                    Paragraph::new(format!("History count: {count}\n\npress q or Esc to quit"))
-                        .alignment(Alignment::Left);
+                let body = Paragraph::new(format!(
+                    "History: {count}  Matching: {result_count}\n\nQuery: {query}\n\nenter=run  tab=edit  esc=quit"
+                ))
+                .alignment(Alignment::Left);
                 f.render_widget(body, inner);
             })
             .map_err(|e| ThothError::Tui(format!("draw failed: {e}")))?;
 
-        if event::poll(std::time::Duration::from_millis(200))
+        if ct_event::poll(std::time::Duration::from_millis(200))
             .map_err(|e| ThothError::Tui(format!("event poll failed: {e}")))?
         {
             if let Event::Key(key) =
-                event::read().map_err(|e| ThothError::Tui(format!("event read failed: {e}")))?
+                ct_event::read().map_err(|e| ThothError::Tui(format!("event read failed: {e}")))?
             {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
-                    _ => {}
+                match handle_key(key, &mut app) {
+                    Outcome::Exit => break,
+                    Outcome::Continue => {}
                 }
             }
+        }
+    }
+
+    if let Some(action) = app.action {
+        match action {
+            app::Action::Run(cmd) => println!("RUN:{cmd}"),
+            app::Action::Edit(cmd) => println!("EDIT:{cmd}"),
         }
     }
 
