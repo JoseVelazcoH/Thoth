@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Cell, Paragraph, Row, Table},
+    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table},
     Frame,
 };
 
@@ -85,6 +85,10 @@ fn filter_chips(app: &App) -> String {
     parts.join(" ")
 }
 
+const ACCENT: Color = Color::Cyan;
+const DIM_COLOR: Color = Color::DarkGray;
+const BORDER_COLOR: Color = Color::DarkGray;
+
 pub fn draw(frame: &mut Frame, app: &App, now: i64) {
     let area = frame.area();
 
@@ -104,26 +108,61 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
     let controls_area = chunks[4];
 
     let version = env!("CARGO_PKG_VERSION");
-    let name_span = Span::styled(" Thoth", Style::default().add_modifier(Modifier::BOLD));
-    let version_span = Span::styled(
-        format!(" v{version}"),
-        Style::default().add_modifier(Modifier::DIM),
-    );
-    let history_right = format!("History count: {} ", app.all_rows.len());
-    let left_len = " Thoth".len() + format!(" v{version}").len();
-    let pad = (header_area.width as usize).saturating_sub(left_len + history_right.len());
+    let accent_style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+    let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
+
+    let accent_bar = Span::styled("▌ ", accent_style);
+    let name_span = Span::styled("Thoth", accent_style);
+    let sep_span = Span::styled(" · ", dim_style);
+    let version_span = Span::styled(format!("v{version}"), dim_style);
+    let count_sep = Span::styled("  ", dim_style);
+    let count_span = Span::styled(format!("{} commands", app.all_rows.len()), dim_style);
+    let history_right = format!("History count: {}", app.all_rows.len());
+    let right_len = history_right.len();
+    let left_len =
+        2 + 5 + 3 + 1 + version.len() + 2 + format!("{} commands", app.all_rows.len()).len();
+    let pad = (header_area.width as usize).saturating_sub(left_len + right_len);
     let padding_span = Span::raw(format!("{:pad$}", "", pad = pad));
-    let history_span = Span::raw(history_right);
-    let header_line = Line::from(vec![name_span, version_span, padding_span, history_span]);
-    let header =
-        Paragraph::new(header_line).style(Style::default().add_modifier(Modifier::REVERSED));
+    let history_span = Span::styled(history_right, dim_style);
+
+    let header_line = Line::from(vec![
+        accent_bar,
+        name_span,
+        sep_span,
+        version_span,
+        count_sep,
+        count_span,
+        padding_span,
+        history_span,
+    ]);
+    let header = Paragraph::new(header_line);
     frame.render_widget(header, header_area);
 
-    let controls = Paragraph::new(" up/down navigate  enter run  tab edit  esc exit")
-        .style(Style::default().add_modifier(Modifier::DIM));
+    let controls_line = Line::from(vec![
+        Span::styled(" ↑↓", accent_style),
+        Span::styled(" navigate", dim_style),
+        Span::styled(" · ", dim_style),
+        Span::styled("↵", accent_style),
+        Span::styled(" run", dim_style),
+        Span::styled(" · ", dim_style),
+        Span::styled("⇥", accent_style),
+        Span::styled(" edit", dim_style),
+        Span::styled(" · ", dim_style),
+        Span::styled("esc", accent_style),
+        Span::styled(" quit", dim_style),
+    ]);
+    let controls = Paragraph::new(controls_line);
     frame.render_widget(controls, controls_area);
 
-    let width = list_area.width as usize;
+    let border_style = Style::default().fg(BORDER_COLOR);
+    let list_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title(Span::styled(" history ", dim_style));
+
+    let inner_list_area = list_block.inner(list_area);
+    frame.render_widget(list_block, list_area);
 
     let time_w: u16 = 9;
     let dur_w: u16 = 7;
@@ -131,9 +170,9 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
     let proj_w: u16 = 14;
     let gaps: u16 = 4;
     let fixed: u16 = time_w + dur_w + exit_w + proj_w + gaps;
-    let cmd_w: u16 = (list_area.width).saturating_sub(fixed);
+    let cmd_w: u16 = inner_list_area.width.saturating_sub(fixed);
 
-    let height = list_area.height as usize;
+    let height = inner_list_area.height as usize;
 
     let visible: Vec<usize> = if app.filtered.is_empty() {
         vec![]
@@ -155,8 +194,8 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
         }
     };
 
-    let dim = Style::default().fg(Color::DarkGray);
-    let cyan = Style::default().fg(Color::Cyan);
+    let dim = Style::default().fg(DIM_COLOR);
+    let cyan = Style::default().fg(ACCENT);
     let blue = Style::default().fg(Color::Blue);
 
     let rows: Vec<Row> = visible
@@ -200,10 +239,8 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
         Constraint::Min(1),
     ];
 
-    let _ = width;
-
     let table = Table::new(rows, widths).block(Block::default());
-    frame.render_widget(table, list_area);
+    frame.render_widget(table, inner_list_area);
 
     let query_text = format!("> {}", app.query);
     let query_widget = Paragraph::new(query_text);
@@ -365,7 +402,7 @@ mod tests {
         terminal.draw(|f| draw(f, &app, TEST_NOW)).unwrap();
         let buf = terminal.backend().buffer().clone();
 
-        let row1_y = 1u16;
+        let row1_y = 2u16;
         let any_reversed = (0..TEST_WIDTH).any(|x| {
             buf[(x, row1_y)]
                 .style()
@@ -436,12 +473,76 @@ mod tests {
             "controls hint must contain 'navigate'; got:\n{text}"
         );
         assert!(
-            text.contains("enter"),
-            "controls hint must contain 'enter'; got:\n{text}"
+            text.contains("run"),
+            "controls hint must contain 'run'; got:\n{text}"
         );
         assert!(
-            text.contains("esc"),
-            "controls hint must contain 'esc'; got:\n{text}"
+            text.contains("edit"),
+            "controls hint must contain 'edit'; got:\n{text}"
+        );
+        assert!(
+            text.contains("quit"),
+            "controls hint must contain 'quit'; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn header_has_no_full_width_reversed_bar() {
+        let app = app_with_rows();
+        let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &app, TEST_NOW)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        let reversed_count = (0..TEST_WIDTH)
+            .filter(|&x| {
+                buf[(x, 0)]
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::REVERSED)
+            })
+            .count();
+        assert_eq!(
+            reversed_count, 0,
+            "header row must have zero REVERSED cells; found {reversed_count}"
+        );
+    }
+
+    #[test]
+    fn border_title_history_appears() {
+        let app = app_with_rows();
+        let text = render_app(&app);
+        assert!(
+            text.contains("history"),
+            "list border must show title 'history'; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn selected_row_is_inside_border() {
+        let mut app = App::new();
+        app.all_rows = vec![
+            make_row("first-cmd", TEST_NOW - 10, 0, "p"),
+            make_row("second-cmd", TEST_NOW - 20, 0, "p"),
+        ];
+        app.recompute();
+        app.selected = 0;
+
+        let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &app, TEST_NOW)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        let row_inside_border_y = 2u16;
+        let any_reversed = (0..TEST_WIDTH).any(|x| {
+            buf[(x, row_inside_border_y)]
+                .style()
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        });
+        assert!(
+            any_reversed,
+            "selected row inside border must have REVERSED modifier at y={row_inside_border_y}"
         );
     }
 
