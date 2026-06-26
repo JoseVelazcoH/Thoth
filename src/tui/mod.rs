@@ -1,6 +1,7 @@
 pub mod app;
 pub mod event;
 pub mod fuzzy;
+pub mod render;
 pub mod time;
 
 use std::fs::OpenOptions;
@@ -11,17 +12,13 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    backend::CrosstermBackend,
-    layout::{Alignment, Constraint, Direction, Layout},
-    widgets::{Block, Borders, Paragraph},
-    Terminal,
-};
+use ratatui::{backend::CrosstermBackend, Terminal};
 use rusqlite::Connection;
 
 use crate::error::ThothError;
 use crate::tui::app::App;
 use crate::tui::event::{handle_key, Outcome};
+use crate::tui::render::format_action_line;
 
 struct TerminalGuard;
 
@@ -45,11 +42,6 @@ impl Drop for TerminalGuard {
             let _ = execute!(tty, LeaveAlternateScreen);
         }
     }
-}
-
-fn history_count(conn: &Connection) -> i64 {
-    conn.query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
-        .unwrap_or(0)
 }
 
 pub fn run(conn: &Connection, now: i64) -> Result<(), ThothError> {
@@ -77,29 +69,9 @@ pub fn run(conn: &Connection, now: i64) -> Result<(), ThothError> {
     let mut app = App::new();
     app.reload(conn, now)?;
 
-    let count = history_count(conn);
-
     loop {
-        let query = app.query.clone();
-        let result_count = app.filtered.len();
         terminal
-            .draw(|f| {
-                let area = f.area();
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Min(3), Constraint::Length(1)])
-                    .split(area);
-
-                let block = Block::default().title(" Thoth ").borders(Borders::ALL);
-                let inner = block.inner(chunks[0]);
-                f.render_widget(block, chunks[0]);
-
-                let body = Paragraph::new(format!(
-                    "History: {count}  Matching: {result_count}\n\nQuery: {query}\n\nenter=run  tab=edit  esc=quit"
-                ))
-                .alignment(Alignment::Left);
-                f.render_widget(body, inner);
-            })
+            .draw(|f| render::draw(f, &app, now))
             .map_err(|e| ThothError::Tui(format!("draw failed: {e}")))?;
 
         if ct_event::poll(std::time::Duration::from_millis(200))
@@ -116,11 +88,10 @@ pub fn run(conn: &Connection, now: i64) -> Result<(), ThothError> {
         }
     }
 
-    if let Some(action) = app.action {
-        match action {
-            app::Action::Run(cmd) => println!("RUN:{cmd}"),
-            app::Action::Edit(cmd) => println!("EDIT:{cmd}"),
-        }
+    drop(_guard);
+
+    if let Some(line) = format_action_line(app.action.as_ref()) {
+        println!("{line}");
     }
 
     Ok(())
