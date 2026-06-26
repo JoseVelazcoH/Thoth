@@ -18,6 +18,7 @@ pub enum Cmd {
     Search(SearchArgs),
     Sessions(SessionsArgs),
     Forget(ForgetArgs),
+    Export(ExportArgs),
     #[command(hide = true)]
     NewSessionId,
 }
@@ -91,6 +92,20 @@ pub struct SessionsArgs {
     pub until: Option<String>,
     #[arg(long, default_value_t = 20)]
     pub limit: usize,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ExportArgs {
+    #[arg(long)]
+    pub session: Option<String>,
+    #[arg(short = 't', long, action = clap::ArgAction::Append)]
+    pub tag: Vec<String>,
+    #[arg(short = 'p', long)]
+    pub project: Option<String>,
+    #[arg(long)]
+    pub since: Option<String>,
+    #[arg(long)]
+    pub exit: Option<crate::search::ExitFilter>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -234,6 +249,22 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                 crate::forget::delete_targets(&conn, &ids)?;
                 println!("Forgot {} command(s).", ids.len());
             }
+        }
+        Some(Cmd::Export(args)) => {
+            let conn = crate::database::get_connection(None)?;
+            let export_args = crate::export::ExportArgs {
+                session: args.session,
+                tag: args.tag.clone(),
+                project: args.project.clone(),
+                since: args.since,
+                exit: args.exit,
+            };
+            let rows = crate::export::collect(&conn, &export_args, now)?;
+            let meta = crate::export::ExportMeta {
+                project: args.project.as_deref(),
+                tags: &args.tag,
+            };
+            print!("{}", crate::export::render_script(&rows, &meta, now));
         }
         Some(Cmd::NewSessionId) => {
             println!("{}", uuid::Uuid::new_v4());

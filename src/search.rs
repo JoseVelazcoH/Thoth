@@ -346,7 +346,7 @@ pub(crate) fn fmt_timestamp(epoch: i64) -> String {
     format!("{y:04}-{mo:02}-{d:02} {hh:02}:{mm:02}")
 }
 
-fn civil_from_days(z: i64) -> (i64, i64, i64) {
+pub(crate) fn civil_from_days(z: i64) -> (i64, i64, i64) {
     let z = z + DAYS_FROM_EPOCH_TO_YEAR_ZERO;
     let era = z.div_euclid(146_097);
     let doe = z - era * 146_097;
