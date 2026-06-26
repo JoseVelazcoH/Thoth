@@ -30,14 +30,18 @@ mod tests {
     }
 
     #[test]
-    fn hook_variant_formats_message() {
-        let err = ThothError::Hook("could not write rc file".into());
-        assert_eq!(err.to_string(), "could not write rc file");
-    }
-
-    #[test]
-    fn search_variant_delegates_to_inner_string() {
-        let err = ThothError::Search("bad input".into());
-        assert_eq!(err.to_string(), "bad input");
+    fn string_variants_delegate_to_inner_string() {
+        assert_eq!(
+            ThothError::Hook("could not write rc file".into()).to_string(),
+            "could not write rc file"
+        );
+        assert_eq!(
+            ThothError::Search("bad input".into()).to_string(),
+            "bad input"
+        );
+        assert_eq!(
+            ThothError::Tui("render failed".into()).to_string(),
+            "tui: render failed"
+        );
     }
 }
