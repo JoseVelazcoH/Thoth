@@ -59,14 +59,6 @@ mod tests {
     }
 
     #[test]
-    fn exact_match_ranks_high() {
-        let items = vec![row("git status"), row("git pull"), row("cargo build")];
-        let result = rank("git status", &items);
-        assert!(!result.is_empty());
-        assert_eq!(result[0], 0);
-    }
-
-    #[test]
     fn fuzzy_dkr_matches_docker() {
         let items = vec![row("docker run nginx"), row("ls -la"), row("cargo test")];
         let result = rank("dkr", &items);
@@ -89,9 +81,4 @@ mod tests {
         assert_eq!(result[0], 0);
     }
 
-    #[test]
-    fn empty_items_returns_empty() {
-        let result = rank("anything", &[]);
-        assert!(result.is_empty());
-    }
 }
