@@ -329,17 +329,13 @@ fn render_by_session(rows: &[CommandRow]) -> String {
 
 fn exit_cell(code: i64) -> Cell {
     if code == 0 {
-        Cell::new("\u{2713}").fg(Color::Green)
+        Cell::new("ok").fg(Color::Green)
     } else {
-        Cell::new("\u{2717}").fg(Color::Red)
+        Cell::new("fail").fg(Color::Red)
     }
 }
 
-pub fn fmt_timestamp_pub(epoch: i64) -> String {
-    fmt_timestamp(epoch)
-}
-
-fn fmt_timestamp(epoch: i64) -> String {
+pub(crate) fn fmt_timestamp(epoch: i64) -> String {
     let secs = epoch;
     let days = secs.div_euclid(SECS_PER_DAY);
     let time_secs = secs.rem_euclid(SECS_PER_DAY);
@@ -811,18 +807,15 @@ mod tests {
     }
 
     #[test]
-    fn exit_glyph_zero_contains_check() {
+    fn exit_zero_cell_is_ok() {
         let cell = exit_cell(0);
-        assert!(
-            cell.content().contains('\u{2713}'),
-            "exit 0 cell must contain the check glyph ✓"
-        );
+        assert_eq!(cell.content(), "ok");
     }
 
     #[test]
-    fn exit_glyph_nonzero_contains_cross() {
+    fn exit_nonzero_cell_is_fail() {
         let cell = exit_cell(1);
-        assert!(cell.content().contains('\u{2717}'));
+        assert_eq!(cell.content(), "fail");
     }
 
     fn fixture_rows() -> Vec<CommandRow> {

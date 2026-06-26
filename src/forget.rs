@@ -89,18 +89,14 @@ pub fn delete_targets(conn: &Connection, ids: &[i64]) -> Result<usize, ThothErro
 }
 
 pub fn render_preview(rows: &[ForgetRow]) -> String {
-    use crate::search::fmt_timestamp_pub;
+    use crate::search::fmt_timestamp;
     let mut out = String::new();
     for row in rows {
-        let ts = fmt_timestamp_pub(row.timestamp);
-        let exit_glyph = if row.exit_code == 0 {
-            "\u{2713}"
-        } else {
-            "\u{2717}"
-        };
+        let ts = fmt_timestamp(row.timestamp);
+        let exit_label = if row.exit_code == 0 { "ok" } else { "fail" };
         out.push_str(&format!(
             "  {} | {} | {} | {}\n",
-            ts, row.project, exit_glyph, row.command
+            ts, row.project, exit_label, row.command
         ));
     }
     out
