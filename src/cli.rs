@@ -16,8 +16,19 @@ pub enum Cmd {
     Uninstall(UninstallArgs),
     Status,
     Search(SearchArgs),
+    Forget(ForgetArgs),
     #[command(hide = true)]
     NewSessionId,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ForgetArgs {
+    #[arg(long, default_value_t = 1)]
+    pub last: usize,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long = "terminal-id")]
+    pub terminal_id: Option<String>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -174,6 +185,31 @@ pub fn run() -> Result<(), crate::error::ThothError> {
             let conn = crate::database::get_connection(None)?;
             let rows = crate::search::execute(&args, &conn, now)?;
             print!("{}", crate::search::render(&rows, args.show_session));
+        }
+        Some(Cmd::Forget(args)) => {
+            if args.last == 0 {
+                return Err(crate::error::ThothError::Forget(
+                    "nothing to forget: --last must be >= 1".into(),
+                ));
+            }
+            let conn = crate::database::get_connection(None)?;
+            let scope = crate::forget::resolve_scope(
+                args.terminal_id,
+                std::env::var("TTH_SESSION_ID").ok(),
+            );
+            let rows = crate::forget::select_targets(&conn, &scope, args.last)?;
+            if rows.is_empty() {
+                println!("No commands to forget.");
+                return Ok(());
+            }
+            let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+            if args.dry_run {
+                print!("{}", crate::forget::render_preview(&rows));
+                println!("Would forget {} command(s).", ids.len());
+            } else {
+                crate::forget::delete_targets(&conn, &ids)?;
+                println!("Forgot {} command(s).", ids.len());
+            }
         }
         Some(Cmd::NewSessionId) => {
             println!("{}", uuid::Uuid::new_v4());

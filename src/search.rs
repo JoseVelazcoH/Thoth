@@ -335,6 +335,10 @@ fn exit_cell(code: i64) -> Cell {
     }
 }
 
+pub fn fmt_timestamp_pub(epoch: i64) -> String {
+    fmt_timestamp(epoch)
+}
+
 fn fmt_timestamp(epoch: i64) -> String {
     let secs = epoch;
     let days = secs.div_euclid(SECS_PER_DAY);

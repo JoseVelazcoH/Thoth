@@ -8,6 +8,8 @@ pub enum ThothError {
     Hook(String),
     #[error("{0}")]
     Search(String),
+    #[error("{0}")]
+    Forget(String),
     #[error("tui: {0}")]
     Tui(String),
 }
