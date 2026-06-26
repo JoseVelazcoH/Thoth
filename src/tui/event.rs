@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn printable_char_appends_to_query_and_recomputes() {
+    fn printable_char_appends_to_query() {
         let mut app = app_with_rows();
         handle_key(key(KeyCode::Char('g')), &mut app);
         assert_eq!(app.query, "g");
