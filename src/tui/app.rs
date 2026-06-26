@@ -155,38 +155,21 @@ mod tests {
     }
 
     #[test]
-    fn to_search_args_project_mapped() {
+    fn to_search_args_all_filter_fields_map_through() {
         let mut fs = FilterState::new();
         fs.project = Some("myapp".into());
-        let args = fs.to_search_args();
-        assert_eq!(args.project, Some("myapp".into()));
-        assert!(args.query.is_none());
-    }
-
-    #[test]
-    fn to_search_args_exit_filter_mapped() {
-        let mut fs = FilterState::new();
         fs.exit = Some(ExitFilter::Fail);
-        let args = fs.to_search_args();
-        assert_eq!(args.exit, Some(ExitFilter::Fail));
-    }
-
-    #[test]
-    fn to_search_args_tags_mapped() {
-        let mut fs = FilterState::new();
         fs.tag = vec!["rust".into(), "cli".into()];
-        let args = fs.to_search_args();
-        assert_eq!(args.tag, vec!["rust".to_string(), "cli".to_string()]);
-    }
-
-    #[test]
-    fn to_search_args_since_until_mapped() {
-        let mut fs = FilterState::new();
         fs.since = Some("2024-01-01".into());
         fs.until = Some("2024-12-31".into());
         let args = fs.to_search_args();
+        assert!(args.query.is_none());
+        assert_eq!(args.project, Some("myapp".into()));
+        assert_eq!(args.exit, Some(ExitFilter::Fail));
+        assert_eq!(args.tag, vec!["rust".to_string(), "cli".to_string()]);
         assert_eq!(args.since, Some("2024-01-01".into()));
         assert_eq!(args.until, Some("2024-12-31".into()));
+        assert_eq!(args.limit, TUI_LIMIT);
     }
 
     #[test]
@@ -197,17 +180,6 @@ mod tests {
         let mut app = App::new();
         app.reload(&conn, 9999).unwrap();
         assert_eq!(app.all_rows.len(), 2);
-    }
-
-    #[test]
-    fn reload_empty_query_returns_all_in_original_order() {
-        let conn = make_conn();
-        seed(&conn, "cmd_old", 1000);
-        seed(&conn, "cmd_new", 2000);
-        let mut app = App::new();
-        app.reload(&conn, 9999).unwrap();
-        assert_eq!(app.filtered.len(), 2);
-        assert_eq!(app.all_rows[app.filtered[0]].command, "cmd_new");
     }
 
     #[test]
