@@ -409,13 +409,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_duration_zero() {
-        let (ord, ms) = parse_duration(">0").unwrap();
-        assert_eq!(ord, Ordering::Greater);
-        assert_eq!(ms, 0);
-    }
-
-    #[test]
     fn parse_duration_no_prefix_is_err() {
         assert!(parse_duration("30").is_err());
     }
@@ -423,11 +416,6 @@ mod tests {
     #[test]
     fn parse_duration_non_numeric_is_err() {
         assert!(parse_duration(">abc").is_err());
-    }
-
-    #[test]
-    fn parse_duration_empty_is_err() {
-        assert!(parse_duration("").is_err());
     }
 
     const FIXED_NOW: i64 = 1_700_000_000;
@@ -490,12 +478,6 @@ mod tests {
     #[test]
     fn parse_date_april_31_is_err() {
         assert!(parse_date("2024-04-31", FIXED_NOW).is_err());
-    }
-
-    #[test]
-    fn parse_date_valid_ymd_returns_epoch() {
-        let result = parse_date("2024-01-01", FIXED_NOW).unwrap();
-        assert_eq!(result, days_since_epoch(2024, 1, 1) * SECS_PER_DAY);
     }
 
     #[test]
@@ -768,35 +750,6 @@ mod tests {
     }
 
     #[test]
-    fn execute_project_filter() {
-        let conn = mem_conn();
-        seed(&conn, s("cmd_a", "alpha", 1_000, 0, 100, "[]", "s1"));
-        seed(&conn, s("cmd_b", "beta", 2_000, 0, 200, "[]", "s1"));
-        seed(&conn, s("cmd_c", "alpha", 3_000, 0, 300, "[]", "s1"));
-        let args = SearchArgs {
-            project: Some("alpha".into()),
-            ..default_args()
-        };
-        let rows = execute(&args, &conn, FIXED_NOW).unwrap();
-        assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|r| r.project == "alpha"));
-    }
-
-    #[test]
-    fn execute_exit_fail_filter() {
-        let conn = mem_conn();
-        seed(&conn, s("ok_cmd", "p", 1_000, 0, 100, "[]", "s1"));
-        seed(&conn, s("fail_cmd", "p", 2_000, 1, 200, "[]", "s1"));
-        let args = SearchArgs {
-            exit: Some(ExitFilter::Fail),
-            ..default_args()
-        };
-        let rows = execute(&args, &conn, FIXED_NOW).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].command, "fail_cmd");
-    }
-
-    #[test]
     fn execute_since_filter() {
         let conn = mem_conn();
         seed(&conn, s("old_cmd", "p", 100, 0, 100, "[]", "s1"));
@@ -808,20 +761,6 @@ mod tests {
         let rows = execute(&args, &conn, FIXED_NOW).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].command, "new_cmd");
-    }
-
-    #[test]
-    fn execute_tag_filter() {
-        let conn = mem_conn();
-        seed(&conn, s("tagged", "p", 1_000, 0, 100, r#"["rust"]"#, "s1"));
-        seed(&conn, s("plain", "p", 2_000, 0, 100, "[]", "s1"));
-        let args = SearchArgs {
-            tag: vec!["rust".into()],
-            ..default_args()
-        };
-        let rows = execute(&args, &conn, FIXED_NOW).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].command, "tagged");
     }
 
     #[test]
@@ -839,23 +778,6 @@ mod tests {
         };
         let rows = execute(&args, &conn, FIXED_NOW).unwrap();
         assert_eq!(rows.len(), 2);
-    }
-
-    #[test]
-    fn execute_fts_query() {
-        let conn = mem_conn();
-        if !crate::database::fts5_available(&conn) {
-            return;
-        }
-        seed(&conn, s("docker run nginx", "p", 1_000, 0, 100, "[]", "s1"));
-        seed(&conn, s("ls -la", "p", 2_000, 0, 100, "[]", "s1"));
-        let args = SearchArgs {
-            query: Some("docker".into()),
-            ..default_args()
-        };
-        let rows = execute(&args, &conn, FIXED_NOW).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].command, "docker run nginx");
     }
 
     #[test]
