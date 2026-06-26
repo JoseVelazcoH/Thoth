@@ -9,3 +9,4 @@ pub mod recorder;
 pub mod schema;
 pub mod search;
 pub mod session;
+pub mod tui;
