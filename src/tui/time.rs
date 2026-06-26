@@ -91,5 +91,4 @@ mod tests {
     fn one_year() {
         assert_eq!(format_relative(NOW - YEAR, NOW), "1y ago");
     }
-
 }

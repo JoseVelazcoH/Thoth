@@ -80,5 +80,4 @@ mod tests {
         assert!(!result.is_empty());
         assert_eq!(result[0], 0);
     }
-
 }

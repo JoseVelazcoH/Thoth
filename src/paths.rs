@@ -102,5 +102,4 @@ mod tests {
         std::env::remove_var("THOTH_DB");
         assert_eq!(result, PathBuf::from("/tmp/wiring_test.db"));
     }
-
 }

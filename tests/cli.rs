@@ -328,4 +328,3 @@ fn record_never_fail_contract_preserved() {
         .assert()
         .code(0);
 }
-

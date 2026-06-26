@@ -187,4 +187,3 @@ fn which_tth() -> bool {
         .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join("tth").exists()))
         .unwrap_or(false)
 }
-
