@@ -6,7 +6,11 @@ autoload -Uz add-zsh-hook
 export TTH_SESSION_ID
 
 _tth_preexec() {
-    _TTH_CMD="$1"
+    local _cmd="$1"
+    case "$_cmd" in
+        tth|tth\ *) return ;;
+    esac
+    _TTH_CMD="$_cmd"
     _TTH_START=$EPOCHREALTIME
 }
 
@@ -27,3 +31,24 @@ _tth_precmd() {
 
 add-zsh-hook preexec _tth_preexec
 add-zsh-hook precmd _tth_precmd
+
+_tth_widget() {
+    command -v tth >/dev/null 2>&1 || return
+    local out
+    out="$(tth </dev/tty 2>/dev/null)"
+    local rc=$?
+    if [[ "$out" == RUN:* ]]; then
+        BUFFER="${out#RUN:}"
+        zle reset-prompt
+        zle accept-line
+    elif [[ "$out" == EDIT:* ]]; then
+        BUFFER="${out#EDIT:}"
+        CURSOR=${#BUFFER}
+        zle reset-prompt
+    else
+        zle reset-prompt
+    fi
+}
+
+zle -N _tth_widget
+bindkey '^R' _tth_widget

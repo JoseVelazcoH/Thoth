@@ -10,7 +10,11 @@ _THOTH_PREV_DEBUG=""
 _thoth_preexec() {
     [[ $_THOTH_IN_PROMPT -eq 1 ]] && return
     [[ "$BASH_COMMAND" == "_thoth_precmd" ]] && return
-    _THOTH_CMD="$BASH_COMMAND"
+    local _cmd="$BASH_COMMAND"
+    case "$_cmd" in
+        tth|tth\ *) return ;;
+    esac
+    _THOTH_CMD="$_cmd"
     _THOTH_START=$EPOCHREALTIME
     if [[ -n "$_THOTH_PREV_DEBUG" ]]; then
         eval "$_THOTH_PREV_DEBUG"
@@ -48,3 +52,20 @@ _thoth_chain_debug() {
 _thoth_chain_debug
 
 PROMPT_COMMAND="_thoth_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+
+_tth_widget() {
+    command -v tth >/dev/null 2>&1 || return
+    local out
+    out="$(tth </dev/tty 2>/dev/null)"
+    if [[ "$out" == RUN:* ]]; then
+        READLINE_LINE="${out#RUN:}"
+        READLINE_POINT=${#READLINE_LINE}
+        READLINE_MARK=-1
+        ( eval "$READLINE_LINE" )
+    elif [[ "$out" == EDIT:* ]]; then
+        READLINE_LINE="${out#EDIT:}"
+        READLINE_POINT=${#READLINE_LINE}
+    fi
+}
+
+bind -x '"\C-r": _tth_widget'

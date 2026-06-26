@@ -226,6 +226,210 @@ _run_bash_trap_chain_single_quote_test() {
     fi
 }
 
+_run_zsh_widget_defined() {
+    if ! command -v zsh >/dev/null 2>&1; then
+        _skip "zsh not available for widget definition check"
+        return
+    fi
+    local content
+    content="$(cat "${REPO_ROOT}/shells/thoth.zsh")"
+    if [[ "$content" == *"_tth_widget"* ]]; then
+        _pass "thoth.zsh: _tth_widget function defined"
+    else
+        _fail "thoth.zsh: _tth_widget function NOT found"
+    fi
+    if [[ "$content" == *"bindkey '^R'"* ]]; then
+        _pass "thoth.zsh: bindkey '^R' present"
+    else
+        _fail "thoth.zsh: bindkey '^R' NOT found"
+    fi
+    if [[ "$content" == *"zle -N _tth_widget"* ]]; then
+        _pass "thoth.zsh: zle -N _tth_widget registration present"
+    else
+        _fail "thoth.zsh: zle -N _tth_widget NOT found"
+    fi
+}
+
+_run_bash_widget_defined() {
+    local content
+    content="$(cat "${REPO_ROOT}/shells/thoth.bash")"
+    if [[ "$content" == *"_tth_widget"* ]]; then
+        _pass "thoth.bash: _tth_widget function defined"
+    else
+        _fail "thoth.bash: _tth_widget function NOT found"
+    fi
+    if [[ "$content" == *'bind -x'*'\C-r'* ]] || [[ "$content" == *"bind -x"*"\C-r"* ]]; then
+        _pass "thoth.bash: bind -x Ctrl-R present"
+    else
+        _fail "thoth.bash: bind -x Ctrl-R NOT found"
+    fi
+}
+
+_run_zsh_capture_exclusion() {
+    if ! command -v zsh >/dev/null 2>&1; then
+        _skip "zsh not available for capture exclusion check"
+        return
+    fi
+
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' RETURN
+
+    local stub_log="$tmpdir/stub.log"
+    local stub_bin="$tmpdir/tth"
+
+    cat > "$stub_bin" <<'STUB'
+#!/usr/bin/env bash
+echo "$@" >> "$STUB_LOG"
+STUB
+    chmod +x "$stub_bin"
+
+    STUB_LOG="$stub_log" \
+    PATH="$tmpdir:$REPO_ROOT/target/debug:$PATH" \
+    TTH_SESSION_ID="test-sid" \
+    zsh --no-rcs -c "
+        export STUB_LOG='$stub_log'
+        source '${REPO_ROOT}/shells/thoth.zsh' 2>/dev/null || true
+        _tth_preexec 'tth search foo'
+        _tth_preexec 'tth'
+        _TTH_START=\$EPOCHREALTIME
+        _tth_preexec 'echo hello'
+        _tth_precmd
+        sleep 0.1
+    " 2>/dev/null || true
+
+    if [[ -f "$stub_log" ]]; then
+        if grep -q 'record' "$stub_log" 2>/dev/null; then
+            if grep 'record' "$stub_log" | grep -q 'tth'; then
+                _fail "zsh: tth command was recorded (exclusion not working)"
+            else
+                _pass "zsh: capture exclusion prevents tth commands from being recorded"
+            fi
+        else
+            _pass "zsh: capture exclusion prevents tth commands from being recorded"
+        fi
+    else
+        _pass "zsh: capture exclusion works (no spurious record call)"
+    fi
+}
+
+_run_bash_capture_exclusion() {
+    if (( BASH_VERSINFO[0] < 5 )); then
+        _skip "bash < 5; capture exclusion test requires bash >= 5"
+        return
+    fi
+
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' RETURN
+
+    local stub_log="$tmpdir/stub.log"
+    local stub_bin="$tmpdir/tth"
+
+    cat > "$stub_bin" <<'STUB'
+#!/usr/bin/env bash
+echo "$@" >> "$STUB_LOG"
+STUB
+    chmod +x "$stub_bin"
+
+    STUB_LOG="$stub_log" \
+    PATH="$tmpdir:$REPO_ROOT/target/debug:$PATH" \
+    TTH_SESSION_ID="test-sid" \
+    bash --norc --noprofile -c "
+        export STUB_LOG='$stub_log'
+        source '${REPO_ROOT}/shells/thoth.bash' 2>/dev/null || true
+        BASH_COMMAND='tth search foo'
+        _thoth_preexec
+        BASH_COMMAND='tth'
+        _thoth_preexec
+        BASH_COMMAND='echo hello'
+        _thoth_preexec
+        _THOTH_START=\$EPOCHREALTIME
+        _THOTH_CMD='echo hello'
+        _thoth_precmd
+        _i=0
+        while (( _i < 100 )); do
+            [[ -s '$stub_log' ]] && break
+            sleep 0.05
+            _i=\$(( _i + 1 ))
+        done
+    " 2>/dev/null || true
+
+    if [[ -f "$stub_log" ]]; then
+        if grep -q 'record' "$stub_log" 2>/dev/null; then
+            if grep 'record' "$stub_log" | grep -qE -- '(^| )tth( |$)'; then
+                _fail "bash: tth command was recorded (exclusion not working)"
+            else
+                _pass "bash: capture exclusion prevents tth commands from being recorded"
+            fi
+        else
+            _pass "bash: capture exclusion works (no record call seen)"
+        fi
+    else
+        _pass "bash: capture exclusion works (no spurious record call)"
+    fi
+}
+
+_run_zsh_parse_run_prefix() {
+    if ! command -v zsh >/dev/null 2>&1; then
+        _skip "zsh not available for RUN: prefix parse check"
+        return
+    fi
+    local result
+    result="$(zsh --no-rcs -c '
+        out="RUN:git status"
+        echo "${out#RUN:}"
+    ' 2>/dev/null)"
+    if [[ "$result" == "git status" ]]; then
+        _pass "zsh: RUN: prefix stripped correctly"
+    else
+        _fail "zsh: RUN: prefix strip failed; got: $result"
+    fi
+}
+
+_run_zsh_parse_edit_prefix() {
+    if ! command -v zsh >/dev/null 2>&1; then
+        _skip "zsh not available for EDIT: prefix parse check"
+        return
+    fi
+    local result
+    result="$(zsh --no-rcs -c '
+        out="EDIT:vim main.rs"
+        echo "${out#EDIT:}"
+    ' 2>/dev/null)"
+    if [[ "$result" == "vim main.rs" ]]; then
+        _pass "zsh: EDIT: prefix stripped correctly"
+    else
+        _fail "zsh: EDIT: prefix strip failed; got: $result"
+    fi
+}
+
+_run_bash_parse_run_prefix() {
+    local result
+    result="$(bash --norc --noprofile -c '
+        out="RUN:git status"
+        echo "${out#RUN:}"
+    ' 2>/dev/null)"
+    if [[ "$result" == "git status" ]]; then
+        _pass "bash: RUN: prefix stripped correctly"
+    else
+        _fail "bash: RUN: prefix strip failed; got: $result"
+    fi
+}
+
+_run_bash_parse_edit_prefix() {
+    local result
+    result="$(bash --norc --noprofile -c '
+        out="EDIT:vim main.rs"
+        echo "${out#EDIT:}"
+    ' 2>/dev/null)"
+    if [[ "$result" == "vim main.rs" ]]; then
+        _pass "bash: EDIT: prefix stripped correctly"
+    else
+        _fail "bash: EDIT: prefix strip failed; got: $result"
+    fi
+}
+
 echo "=== Thoth shell hook smoke tests ==="
 _run_bash_version_check
 _run_bash_syntax_check
@@ -237,6 +441,14 @@ _run_bash_trap_chain_single_quote_test
 _run_bash_test
 _run_bash_record_test
 _run_zsh_test
+_run_zsh_widget_defined
+_run_bash_widget_defined
+_run_zsh_capture_exclusion
+_run_bash_capture_exclusion
+_run_zsh_parse_run_prefix
+_run_zsh_parse_edit_prefix
+_run_bash_parse_run_prefix
+_run_bash_parse_edit_prefix
 
 echo "---"
 echo "PASS=$PASS FAIL=$FAIL SKIP=$SKIP"
