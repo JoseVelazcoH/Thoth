@@ -644,12 +644,25 @@ mod tests {
 
     #[test]
     fn build_query_fts_multi_token() {
+        let conn = mem_conn();
+        if !crate::database::fts5_available(&conn) {
+            return;
+        }
+        seed(&conn, s("foo bar baz", "p", 1_000, 0, 100, "[]", "s1"));
+        seed(&conn, s("foo only", "p", 2_000, 0, 100, "[]", "s1"));
+        seed(&conn, s("bar only", "p", 3_000, 0, 100, "[]", "s1"));
         let args = SearchArgs {
             query: Some("foo bar".into()),
             ..default_args()
         };
-        let (sql, _params) = build_query(&args, FIXED_NOW).unwrap();
-        assert!(sql.contains("INNER JOIN commands_fts"));
+        let rows = execute(&args, &conn, FIXED_NOW).unwrap();
+        assert_eq!(
+            rows.len(),
+            1,
+            "multi-token FTS must require all tokens present; got {} rows",
+            rows.len()
+        );
+        assert_eq!(rows[0].command, "foo bar baz");
     }
 
     #[test]
@@ -874,9 +887,9 @@ mod tests {
     #[test]
     fn exit_glyph_zero_contains_check() {
         let cell = exit_cell(0);
-        let s = format!("{:?}", cell);
         assert!(
-            s.contains('\u{2713}') || s.contains("2713") || cell.content().contains('\u{2713}')
+            cell.content().contains('\u{2713}'),
+            "exit 0 cell must contain the check glyph ✓"
         );
     }
 
@@ -997,6 +1010,9 @@ mod tests {
     #[test]
     fn render_empty_rows_does_not_panic() {
         let out = render(&[], false);
-        assert!(!out.is_empty());
+        assert!(
+            out.contains("0 result(s)"),
+            "empty render must show '0 result(s)'; got: {out}"
+        );
     }
 }
