@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser)]
-#[command(name = "tth")]
+#[command(name = "tth", arg_required_else_help = false)]
 pub struct Cli {
     #[command(subcommand)]
-    pub cmd: Cmd,
+    pub cmd: Option<Cmd>,
 }
 
 #[derive(Subcommand)]
@@ -81,8 +81,17 @@ pub fn run() -> Result<(), crate::error::ThothError> {
     use clap::Parser;
     let cli = Cli::parse();
 
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
     match cli.cmd {
-        Cmd::Record(mut args) => {
+        None => {
+            let conn = crate::database::get_connection(None)?;
+            crate::tui::run(&conn, now)?;
+        }
+        Some(Cmd::Record(mut args)) => {
             crate::logging::setup(crate::paths::resolve_error_log());
             if args.dir.is_none() {
                 args.dir = std::env::current_dir()
@@ -102,7 +111,7 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                 Err(e) => crate::logging::log_error(&e.to_string()),
             }
         }
-        Cmd::Install(args) => {
+        Some(Cmd::Install(args)) => {
             let shell_env = std::env::var("SHELL").ok();
             let shell = crate::hooks::detect_shell(args.shell.as_deref(), shell_env.as_deref())?;
             let rc_path = if let Some(p) = args.rc_file {
@@ -119,7 +128,7 @@ pub fn run() -> Result<(), crate::error::ThothError> {
             }
             println!("Reload shell: {}", report.reload_cmd);
         }
-        Cmd::Uninstall(args) => {
+        Some(Cmd::Uninstall(args)) => {
             let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
             let rc_path = if let Some(p) = args.rc_file {
                 p
@@ -138,7 +147,7 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                 println!("No hooks found in {}", rc_path.display());
             }
         }
-        Cmd::Status => {
+        Some(Cmd::Status) => {
             let conn = crate::database::get_connection(None)?;
             let shell_env = std::env::var("SHELL").ok();
             let shell = crate::hooks::detect_shell(None, shell_env.as_deref())
@@ -161,16 +170,12 @@ pub fn run() -> Result<(), crate::error::ThothError> {
             println!("Session ID set:   {}", report.session_id_set);
             println!("tth on PATH:      {}", report.tth_on_path);
         }
-        Cmd::Search(args) => {
+        Some(Cmd::Search(args)) => {
             let conn = crate::database::get_connection(None)?;
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64;
             let rows = crate::search::execute(&args, &conn, now)?;
             print!("{}", crate::search::render(&rows, args.show_session));
         }
-        Cmd::NewSessionId => {
+        Some(Cmd::NewSessionId) => {
             println!("{}", uuid::Uuid::new_v4());
         }
     }
