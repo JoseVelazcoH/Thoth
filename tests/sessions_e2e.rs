@@ -39,7 +39,6 @@ struct Fixture {
     _dir: TempDir,
     db: String,
     log: String,
-    alpha_dir: String,
     beta_dir: String,
 }
 
@@ -95,7 +94,6 @@ fn setup() -> Fixture {
         _dir: dir,
         db,
         log,
-        alpha_dir: alpha_str,
         beta_dir: beta_str,
     }
 }
@@ -117,7 +115,9 @@ fn sessions_lists_newest_first() {
     assert!(text.contains("2 session(s)"), "expected footer with count");
 
     let session_col_pos = text.find("session").unwrap_or(0);
-    let beta_pos = text.find(&f.beta_dir.split('/').last().unwrap_or("beta")[..4.min(f.beta_dir.len())]).unwrap_or(usize::MAX);
+    let beta_pos = text
+        .find(&f.beta_dir.split('/').next_back().unwrap_or("beta")[..4.min(f.beta_dir.len())])
+        .unwrap_or(usize::MAX);
     let alpha_pos = text.find("alpha").unwrap_or(usize::MAX);
     assert!(
         beta_pos < alpha_pos || session_col_pos == 0,
