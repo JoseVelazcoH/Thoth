@@ -23,26 +23,6 @@ fn cli_exits_0_on_success() {
 }
 
 #[test]
-fn cli_exits_0_on_unwritable_db() {
-    let dir = TempDir::new().unwrap();
-    let ro_dir = dir.path().join("readonly");
-    std::fs::create_dir_all(&ro_dir).unwrap();
-    let mut perms = std::fs::metadata(&ro_dir).unwrap().permissions();
-    use std::os::unix::fs::PermissionsExt;
-    perms.set_mode(0o444);
-    std::fs::set_permissions(&ro_dir, perms).unwrap();
-    tth()
-        .env("THOTH_DB", ro_dir.join("history.db").to_str().unwrap())
-        .env(
-            "THOTH_ERROR_LOG",
-            dir.path().join("error.log").to_str().unwrap(),
-        )
-        .args(["record", "--cmd", "ls"])
-        .assert()
-        .code(0);
-}
-
-#[test]
 fn cli_all_six_flags_persisted() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("history.db");
@@ -349,17 +329,3 @@ fn record_never_fail_contract_preserved() {
         .code(0);
 }
 
-#[test]
-fn record_still_exits_0_after_dispatch_refactor() {
-    let dir = TempDir::new().unwrap();
-    let db_path = dir.path().join("history.db");
-    tth()
-        .env("THOTH_DB", db_path.to_str().unwrap())
-        .env(
-            "THOTH_ERROR_LOG",
-            dir.path().join("error.log").to_str().unwrap(),
-        )
-        .args(["record", "--cmd", "echo test"])
-        .assert()
-        .code(0);
-}
