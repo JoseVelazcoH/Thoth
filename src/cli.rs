@@ -16,6 +16,7 @@ pub enum Cmd {
     Uninstall(UninstallArgs),
     Status,
     Search(SearchArgs),
+    Sessions(SessionsArgs),
     Forget(ForgetArgs),
     #[command(hide = true)]
     NewSessionId,
@@ -78,6 +79,18 @@ pub struct SearchArgs {
     pub limit: usize,
     #[arg(long = "show-session", default_value_t = false)]
     pub show_session: bool,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct SessionsArgs {
+    #[arg(long)]
+    pub project: Option<String>,
+    #[arg(long)]
+    pub since: Option<String>,
+    #[arg(long)]
+    pub until: Option<String>,
+    #[arg(long, default_value_t = 20)]
+    pub limit: usize,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -185,6 +198,17 @@ pub fn run() -> Result<(), crate::error::ThothError> {
             let conn = crate::database::get_connection(None)?;
             let rows = crate::search::execute(&args, &conn, now)?;
             print!("{}", crate::search::render(&rows, args.show_session));
+        }
+        Some(Cmd::Sessions(args)) => {
+            let conn = crate::database::get_connection(None)?;
+            let sargs = crate::sessions::SessionsArgs {
+                project: args.project,
+                since: args.since,
+                until: args.until,
+                limit: args.limit,
+            };
+            let rows = crate::sessions::list_sessions(&conn, &sargs, now)?;
+            print!("{}", crate::sessions::render(&rows));
         }
         Some(Cmd::Forget(args)) => {
             if args.last == 0 {
