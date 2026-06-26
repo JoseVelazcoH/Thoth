@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod database;
 pub mod error;
+pub mod export;
 pub mod forget;
 pub mod hooks;
 pub mod logging;
