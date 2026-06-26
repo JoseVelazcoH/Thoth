@@ -90,30 +90,37 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
 
     let chunks = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(1),
         Constraint::Min(1),
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
     ])
     .split(area);
 
     let header_area = chunks[0];
-    let controls_area = chunks[1];
-    let list_area = chunks[2];
-    let query_area = chunks[3];
-    let status_area = chunks[4];
+    let list_area = chunks[1];
+    let query_area = chunks[2];
+    let status_area = chunks[3];
+    let controls_area = chunks[4];
 
     let version = env!("CARGO_PKG_VERSION");
-    let header_left = format!(" tth v{version}");
+    let name_span = Span::styled(" Thoth", Style::default().add_modifier(Modifier::BOLD));
+    let version_span = Span::styled(
+        format!(" v{version}"),
+        Style::default().add_modifier(Modifier::DIM),
+    );
     let history_right = format!("History count: {} ", app.all_rows.len());
-    let pad = (header_area.width as usize).saturating_sub(header_left.len() + history_right.len());
-    let header_text = format!("{header_left}{:pad$}{history_right}", "", pad = pad);
+    let left_len = " Thoth".len() + format!(" v{version}").len();
+    let pad = (header_area.width as usize).saturating_sub(left_len + history_right.len());
+    let padding_span = Span::raw(format!("{:pad$}", "", pad = pad));
+    let history_span = Span::raw(history_right);
+    let header_line = Line::from(vec![name_span, version_span, padding_span, history_span]);
     let header =
-        Paragraph::new(header_text).style(Style::default().add_modifier(Modifier::REVERSED));
+        Paragraph::new(header_line).style(Style::default().add_modifier(Modifier::REVERSED));
     frame.render_widget(header, header_area);
 
     let controls = Paragraph::new(" up/down navigate  enter run  tab edit  esc exit")
-        .style(Style::default().fg(Color::DarkGray));
+        .style(Style::default().add_modifier(Modifier::DIM));
     frame.render_widget(controls, controls_area);
 
     let width = list_area.width as usize;
@@ -278,7 +285,10 @@ mod tests {
     fn header_contains_version_and_history_count() {
         let app = app_with_rows();
         let text = render_app(&app);
-        assert!(text.contains("tth v"), "header must contain version string");
+        assert!(
+            text.contains("Thoth"),
+            "header must contain product name 'Thoth'"
+        );
         assert!(
             text.contains("History count: 3"),
             "header must contain history count: got {text}"
@@ -355,7 +365,7 @@ mod tests {
         terminal.draw(|f| draw(f, &app, TEST_NOW)).unwrap();
         let buf = terminal.backend().buffer().clone();
 
-        let row1_y = 2u16;
+        let row1_y = 1u16;
         let any_reversed = (0..TEST_WIDTH).any(|x| {
             buf[(x, row1_y)]
                 .style()
