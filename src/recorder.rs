@@ -275,18 +275,6 @@ mod tests {
     }
 
     #[test]
-    fn locked_db_retry_succeeds() {
-        let dir = TempDir::new().unwrap();
-        let mut conn = disk_conn(&dir);
-        let args = base_args();
-        record(&args, &mut conn);
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-
-    #[test]
     fn record_never_propagates_error() {
         let dir = TempDir::new().unwrap();
         let log_path = dir.path().join("error.log");

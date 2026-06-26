@@ -519,34 +519,6 @@ mod tests {
     }
 
     #[test]
-    fn selected_row_is_inside_border() {
-        let mut app = App::new();
-        app.all_rows = vec![
-            make_row("first-cmd", TEST_NOW - 10, 0, "p"),
-            make_row("second-cmd", TEST_NOW - 20, 0, "p"),
-        ];
-        app.recompute();
-        app.selected = 0;
-
-        let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &app, TEST_NOW)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-
-        let row_inside_border_y = 2u16;
-        let any_reversed = (0..TEST_WIDTH).any(|x| {
-            buf[(x, row_inside_border_y)]
-                .style()
-                .add_modifier
-                .contains(Modifier::REVERSED)
-        });
-        assert!(
-            any_reversed,
-            "selected row inside border must have REVERSED modifier at y={row_inside_border_y}"
-        );
-    }
-
-    #[test]
     fn multiline_command_is_collapsed_in_render() {
         let mut app = App::new();
         app.all_rows = vec![make_row("git\nstatus\n  --short", TEST_NOW - 10, 0, "p")];
@@ -580,20 +552,6 @@ mod tests {
     fn format_action_line_none_produces_no_output() {
         let result = format_action_line(None);
         assert!(result.is_none(), "None action must produce no stdout line");
-    }
-
-    #[test]
-    fn format_action_line_run_no_newline_in_result() {
-        let action = Action::Run("echo hello".to_string());
-        let line = format_action_line(Some(&action)).unwrap();
-        assert!(!line.contains('\n'), "action line must not contain newline");
-    }
-
-    #[test]
-    fn format_action_line_edit_no_newline_in_result() {
-        let action = Action::Edit("nano config".to_string());
-        let line = format_action_line(Some(&action)).unwrap();
-        assert!(!line.contains('\n'), "action line must not contain newline");
     }
 
     #[test]

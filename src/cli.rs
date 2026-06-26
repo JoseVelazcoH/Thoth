@@ -187,35 +187,3 @@ fn which_tth() -> bool {
         .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join("tth").exists()))
         .unwrap_or(false)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_tags_is_empty_array() {
-        let args = RecordArgs {
-            cmd: String::from("ls"),
-            dir: None,
-            exit_code: 0,
-            duration: 0,
-            timestamp: None,
-            tags: String::from("[]"),
-            terminal_id: None,
-        };
-        assert_eq!(args.tags, "[]");
-    }
-
-    #[test]
-    fn default_timestamp_is_now() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        assert!((ts - now).abs() < 2);
-    }
-}

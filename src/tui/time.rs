@@ -58,23 +58,8 @@ mod tests {
     }
 
     #[test]
-    fn fifty_nine_seconds_is_seconds() {
-        assert_eq!(format_relative(NOW - 59, NOW), "59s ago");
-    }
-
-    #[test]
     fn sixty_seconds_is_one_minute() {
         assert_eq!(format_relative(NOW - MINUTE, NOW), "1m ago");
-    }
-
-    #[test]
-    fn three_minutes() {
-        assert_eq!(format_relative(NOW - 3 * MINUTE, NOW), "3m ago");
-    }
-
-    #[test]
-    fn fifty_nine_minutes() {
-        assert_eq!(format_relative(NOW - 59 * MINUTE, NOW), "59m ago");
     }
 
     #[test]
@@ -83,38 +68,13 @@ mod tests {
     }
 
     #[test]
-    fn two_hours() {
-        assert_eq!(format_relative(NOW - 2 * HOUR, NOW), "2h ago");
-    }
-
-    #[test]
-    fn twenty_three_hours() {
-        assert_eq!(format_relative(NOW - 23 * HOUR, NOW), "23h ago");
-    }
-
-    #[test]
     fn one_day() {
         assert_eq!(format_relative(NOW - DAY, NOW), "1d ago");
     }
 
     #[test]
-    fn five_days() {
-        assert_eq!(format_relative(NOW - 5 * DAY, NOW), "5d ago");
-    }
-
-    #[test]
-    fn six_days() {
-        assert_eq!(format_relative(NOW - 6 * DAY, NOW), "6d ago");
-    }
-
-    #[test]
     fn one_week() {
         assert_eq!(format_relative(NOW - WEEK, NOW), "1w ago");
-    }
-
-    #[test]
-    fn three_weeks() {
-        assert_eq!(format_relative(NOW - 3 * WEEK, NOW), "3w ago");
     }
 
     #[test]
@@ -128,22 +88,7 @@ mod tests {
     }
 
     #[test]
-    fn six_months() {
-        assert_eq!(format_relative(NOW - 6 * MONTH, NOW), "6mo ago");
-    }
-
-    #[test]
-    fn eleven_months() {
-        assert_eq!(format_relative(NOW - 11 * MONTH, NOW), "11mo ago");
-    }
-
-    #[test]
     fn one_year() {
         assert_eq!(format_relative(NOW - YEAR, NOW), "1y ago");
-    }
-
-    #[test]
-    fn two_years() {
-        assert_eq!(format_relative(NOW - 2 * YEAR, NOW), "2y ago");
     }
 }

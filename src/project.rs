@@ -286,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn cache_refresh_preserves_command_count() {
+    fn infer_project_is_read_only() {
         let dir = TempDir::new().unwrap();
         let app = dir.path().join("count-app");
         std::fs::create_dir_all(&app).unwrap();

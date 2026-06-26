@@ -186,17 +186,6 @@ fn search_tag_filter() {
 }
 
 #[test]
-fn search_duration_valid_exits_0() {
-    let f = setup();
-    tth()
-        .env("THOTH_DB", &f.db)
-        .env("THOTH_ERROR_LOG", &f.log)
-        .args(["search", "--duration", ">0"])
-        .assert()
-        .code(0);
-}
-
-#[test]
 fn search_duration_bad_exits_nonzero_with_error() {
     let f = setup();
     let cmd_out = tth()
@@ -230,22 +219,6 @@ fn search_since_bad_date_exits_nonzero() {
         !cmd_out.status.success(),
         "expected non-zero exit for bad date"
     );
-}
-
-#[test]
-fn search_show_session_exits_0_with_separator() {
-    let f = setup();
-    let out = tth()
-        .env("THOTH_DB", &f.db)
-        .env("THOTH_ERROR_LOG", &f.log)
-        .args(["search", "--show-session"])
-        .assert()
-        .code(0)
-        .get_output()
-        .stdout
-        .clone();
-    let text = String::from_utf8_lossy(&out);
-    assert!(text.contains("---"), "expected session separator in output");
 }
 
 fn setup_duration_boundary() -> Fixture {

@@ -86,7 +86,14 @@ pub fn fts5_available(conn: &Connection) -> bool {
 }
 
 pub fn apply_migrations(conn: &mut Connection) -> Result<(), ThothError> {
-    for &(version, sql) in MIGRATIONS {
+    apply_migration_list(conn, MIGRATIONS)
+}
+
+fn apply_migration_list(
+    conn: &mut Connection,
+    migrations: &[(i64, &str)],
+) -> Result<(), ThothError> {
+    for &(version, sql) in migrations {
         if version == 2 && !fts5_available(conn) {
             continue;
         }
@@ -314,33 +321,37 @@ mod tests {
     }
 
     #[test]
-    fn fts_skip_does_not_record_v2() {
-        let conn = connect_memory().unwrap();
-        conn.execute_batch(SCHEMA_V1).unwrap();
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-        conn.execute(
-            "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(1, ?1)",
-            rusqlite::params![now],
-        )
-        .unwrap();
-        let ver = current_version(&conn);
-        assert_eq!(ver, 1);
-    }
-
-    #[test]
     fn atomicity_rollback_on_bad_migration() {
+        const BAD_MIGRATION: &[(i64, &str)] = &[(
+            99,
+            "CREATE TABLE should_not_exist(x);\nTHIS IS NOT VALID SQL;",
+        )];
+
         let mut conn = connect_memory().unwrap();
+        apply_migrations(&mut conn).unwrap();
         let ver_before = current_version(&conn);
-        let bad_sql = "THIS IS NOT VALID SQL;";
-        let tx = conn.transaction().unwrap();
-        let result = tx.execute_batch(bad_sql);
-        assert!(result.is_err());
-        drop(tx);
+
+        let result = apply_migration_list(&mut conn, BAD_MIGRATION);
+
+        assert!(result.is_err(), "bad migration SQL must return an error");
         let ver_after = current_version(&conn);
-        assert_eq!(ver_before, ver_after);
+        assert_eq!(
+            ver_before, ver_after,
+            "schema_version must not advance when migration SQL is invalid"
+        );
+        let tables: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+                .unwrap();
+            stmt.query_map([], |row| row.get(0))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        assert!(
+            !tables.iter().any(|t| t == "should_not_exist"),
+            "no phantom tables must survive the rolled-back transaction"
+        );
     }
 
     #[test]
@@ -417,37 +428,5 @@ mod tests {
                 "round {_round}: expected {THREADS} rows, got {count}"
             );
         }
-    }
-
-    #[test]
-    fn execute_batch_smoke() {
-        let mut conn = connect_memory().unwrap();
-        apply_migrations(&mut conn).unwrap();
-
-        let sql = "
-CREATE TABLE IF NOT EXISTS audit_log (
-    id    INTEGER PRIMARY KEY AUTOINCREMENT,
-    label TEXT    NOT NULL
-);
-
-CREATE TRIGGER IF NOT EXISTS commands_audit AFTER INSERT ON commands BEGIN
-    INSERT INTO audit_log(label)
-    VALUES(
-        CASE
-            WHEN new.exit_code = 0 THEN 'ok; -- not a split'
-            ELSE 'fail'
-        END
-    );
-END;
-";
-        conn.execute_batch(sql).unwrap();
-        conn.execute(
-            "INSERT INTO commands(command, directory, project, session_id, timestamp) VALUES('ls', '/tmp', 'p', 'sid', 1700000000)",
-            [],
-        ).unwrap();
-        let label: String = conn
-            .query_row("SELECT label FROM audit_log", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(label, "ok; -- not a split");
     }
 }

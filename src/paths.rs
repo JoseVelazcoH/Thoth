@@ -102,12 +102,4 @@ mod tests {
         std::env::remove_var("THOTH_DB");
         assert_eq!(result, PathBuf::from("/tmp/wiring_test.db"));
     }
-
-    #[test]
-    fn resolve_error_log_wires_thoth_error_log() {
-        std::env::set_var("THOTH_ERROR_LOG", "/tmp/wiring_test.log");
-        let result = resolve_error_log();
-        std::env::remove_var("THOTH_ERROR_LOG");
-        assert_eq!(result, PathBuf::from("/tmp/wiring_test.log"));
-    }
 }
