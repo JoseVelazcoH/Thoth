@@ -2,51 +2,67 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, List, ListItem, ListState, Paragraph, StatefulWidget},
+    widgets::{Block, Cell, Paragraph, Row, Table},
     Frame,
 };
 
-use crate::search::CommandRow;
 use crate::tui::app::App;
 use crate::tui::time::format_relative;
 
-const EXIT_OK_GLYPH: &str = "✓";
-const EXIT_FAIL_GLYPH: &str = "✗";
+pub fn display_command(raw: &str) -> String {
+    let collapsed: String = raw
+        .chars()
+        .map(|c| {
+            if c == '\n' || c == '\r' || c == '\t' {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let mut result = String::with_capacity(collapsed.len());
+    let mut prev_space = false;
+    for c in collapsed.chars() {
+        if c == ' ' {
+            if !prev_space {
+                result.push(c);
+            }
+            prev_space = true;
+        } else {
+            result.push(c);
+            prev_space = false;
+        }
+    }
+    result.trim().to_string()
+}
 
-fn exit_span(exit_code: i64) -> Span<'static> {
-    if exit_code == 0 {
-        Span::styled(EXIT_OK_GLYPH, Style::default().fg(Color::Green))
+fn format_duration(ms: i64) -> String {
+    if ms < 1000 {
+        format!("{ms}ms")
     } else {
-        Span::styled(EXIT_FAIL_GLYPH, Style::default().fg(Color::Red))
+        format!("{}s", ms / 1000)
     }
 }
 
-fn row_line<'a>(row: &'a CommandRow, now: i64, width: usize) -> Line<'a> {
-    let rel_time = format_relative(row.timestamp, now);
-    let glyph = exit_span(row.exit_code);
-
-    let time_span = Span::raw(format!("{:>8} ", rel_time));
-    let project_span = Span::raw(format!("{} ", row.project));
-
-    let overhead = rel_time.len() + 1 + 1 + 1 + row.project.len() + 1;
-    let cmd_width = if width > overhead {
-        width - overhead
+fn exit_text(exit_code: i64) -> (&'static str, Color) {
+    if exit_code == 0 {
+        ("ok", Color::Green)
     } else {
-        1
-    };
-    let command = if row.command.len() > cmd_width {
-        format!("{}…", &row.command[..cmd_width.saturating_sub(1)])
-    } else {
-        row.command.clone()
-    };
+        ("fail", Color::Red)
+    }
+}
 
-    Line::from(vec![
-        time_span,
-        glyph,
-        Span::raw(" "),
-        project_span,
-        Span::raw(command),
-    ])
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let end = s
+            .char_indices()
+            .nth(max.saturating_sub(1))
+            .map(|(i, _)| i)
+            .unwrap_or(s.len());
+        format!("{}...", &s[..end])
+    }
 }
 
 fn filter_chips(app: &App) -> String {
@@ -74,6 +90,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
 
     let chunks = Layout::vertical([
         Constraint::Length(1),
+        Constraint::Length(1),
         Constraint::Min(1),
         Constraint::Length(1),
         Constraint::Length(1),
@@ -81,9 +98,10 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
     .split(area);
 
     let header_area = chunks[0];
-    let list_area = chunks[1];
-    let query_area = chunks[2];
-    let status_area = chunks[3];
+    let controls_area = chunks[1];
+    let list_area = chunks[2];
+    let query_area = chunks[3];
+    let status_area = chunks[4];
 
     let version = env!("CARGO_PKG_VERSION");
     let header_left = format!(" tth v{version}");
@@ -94,7 +112,20 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
         Paragraph::new(header_text).style(Style::default().add_modifier(Modifier::REVERSED));
     frame.render_widget(header, header_area);
 
+    let controls = Paragraph::new(" up/down navigate  enter run  tab edit  esc exit")
+        .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(controls, controls_area);
+
     let width = list_area.width as usize;
+
+    let time_w: u16 = 9;
+    let dur_w: u16 = 7;
+    let exit_w: u16 = 4;
+    let proj_w: u16 = 14;
+    let gaps: u16 = 4;
+    let fixed: u16 = time_w + dur_w + exit_w + proj_w + gaps;
+    let cmd_w: u16 = (list_area.width).saturating_sub(fixed);
+
     let height = list_area.height as usize;
 
     let visible: Vec<usize> = if app.filtered.is_empty() {
@@ -117,28 +148,55 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
         }
     };
 
-    let items: Vec<ListItem> = visible
+    let dim = Style::default().fg(Color::DarkGray);
+    let cyan = Style::default().fg(Color::Cyan);
+    let blue = Style::default().fg(Color::Blue);
+
+    let rows: Vec<Row> = visible
         .iter()
         .enumerate()
         .map(|(vi, &fi)| {
             let row = &app.all_rows[app.filtered[fi]];
-            let line = row_line(row, now, width);
-            let style = if Some(vi) == selected_in_visible {
+            let rel = format_relative(row.timestamp, now);
+            let dur = format_duration(row.duration_ms);
+            let (exit_label, exit_color) = exit_text(row.exit_code);
+            let proj = truncate(&row.project, proj_w as usize);
+            let cmd = display_command(&row.command);
+            let cmd = truncate(&cmd, cmd_w as usize);
+
+            let row_style = if Some(vi) == selected_in_visible {
                 Style::default()
                     .add_modifier(Modifier::REVERSED)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
-            ListItem::new(line).style(style)
+
+            let time_cell = Cell::from(Line::from(vec![Span::styled(rel, dim)]));
+            let dur_cell = Cell::from(Line::from(vec![Span::styled(dur, cyan)]));
+            let exit_cell = Cell::from(Line::from(vec![Span::styled(
+                exit_label,
+                Style::default().fg(exit_color),
+            )]));
+            let proj_cell = Cell::from(Line::from(vec![Span::styled(proj, blue)]));
+            let cmd_cell = Cell::from(Line::from(vec![Span::raw(cmd)]));
+
+            Row::new([time_cell, dur_cell, exit_cell, proj_cell, cmd_cell]).style(row_style)
         })
         .collect();
 
-    let mut list_state = ListState::default();
-    list_state.select(selected_in_visible);
+    let widths = [
+        Constraint::Length(time_w),
+        Constraint::Length(dur_w),
+        Constraint::Length(exit_w),
+        Constraint::Length(proj_w),
+        Constraint::Min(1),
+    ];
 
-    let list = List::new(items).block(Block::default());
-    StatefulWidget::render(list, list_area, frame.buffer_mut(), &mut list_state);
+    let _ = width;
+
+    let table = Table::new(rows, widths).block(Block::default());
+    frame.render_widget(table, list_area);
 
     let query_text = format!("> {}", app.query);
     let query_widget = Paragraph::new(query_text);
@@ -297,7 +355,7 @@ mod tests {
         terminal.draw(|f| draw(f, &app, TEST_NOW)).unwrap();
         let buf = terminal.backend().buffer().clone();
 
-        let row1_y = 1u16;
+        let row1_y = 2u16;
         let any_reversed = (0..TEST_WIDTH).any(|x| {
             buf[(x, row1_y)]
                 .style()
@@ -327,6 +385,69 @@ mod tests {
         assert!(
             text.contains("[project:myproject]"),
             "status bar must show project filter chip; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn exit_ok_renders_as_text_not_glyph() {
+        let mut app = App::new();
+        app.all_rows = vec![make_row("ls", TEST_NOW - 10, 0, "p")];
+        app.recompute();
+        let text = render_app(&app);
+        assert!(
+            text.contains("ok"),
+            "exit 0 must render as 'ok'; got:\n{text}"
+        );
+        assert!(!text.contains('✓'), "exit 0 must NOT render as glyph ✓");
+    }
+
+    #[test]
+    fn exit_fail_renders_as_text_not_glyph() {
+        let mut app = App::new();
+        app.all_rows = vec![make_row("bad-cmd", TEST_NOW - 10, 1, "p")];
+        app.recompute();
+        let text = render_app(&app);
+        assert!(
+            text.contains("fail"),
+            "exit nonzero must render as 'fail'; got:\n{text}"
+        );
+        assert!(
+            !text.contains('✗'),
+            "exit nonzero must NOT render as glyph ✗"
+        );
+    }
+
+    #[test]
+    fn controls_hint_is_visible() {
+        let app = app_with_rows();
+        let text = render_app(&app);
+        assert!(
+            text.contains("navigate"),
+            "controls hint must contain 'navigate'; got:\n{text}"
+        );
+        assert!(
+            text.contains("enter"),
+            "controls hint must contain 'enter'; got:\n{text}"
+        );
+        assert!(
+            text.contains("esc"),
+            "controls hint must contain 'esc'; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn multiline_command_is_collapsed_in_render() {
+        let mut app = App::new();
+        app.all_rows = vec![make_row("git\nstatus\n  --short", TEST_NOW - 10, 0, "p")];
+        app.recompute();
+        let text = render_app(&app);
+        assert!(
+            !text.contains('\n') || !text.lines().any(|l| l.trim().starts_with("status")),
+            "multi-line command must be collapsed to one line"
+        );
+        assert!(
+            text.contains("git status --short"),
+            "collapsed command must appear as single line; got:\n{text}"
         );
     }
 
@@ -362,5 +483,48 @@ mod tests {
         let action = Action::Edit("nano config".to_string());
         let line = format_action_line(Some(&action)).unwrap();
         assert!(!line.contains('\n'), "action line must not contain newline");
+    }
+
+    #[test]
+    fn display_command_collapses_newlines() {
+        assert_eq!(display_command("git\nstatus"), "git status");
+    }
+
+    #[test]
+    fn display_command_collapses_carriage_returns() {
+        assert_eq!(display_command("git\r\nstatus"), "git status");
+    }
+
+    #[test]
+    fn display_command_collapses_tabs() {
+        assert_eq!(display_command("git\tstatus"), "git status");
+    }
+
+    #[test]
+    fn display_command_collapses_multiple_spaces() {
+        assert_eq!(display_command("git   status"), "git status");
+    }
+
+    #[test]
+    fn display_command_trims_leading_trailing() {
+        assert_eq!(display_command("  git status  "), "git status");
+    }
+
+    #[test]
+    fn display_command_multiline_with_indentation() {
+        assert_eq!(
+            display_command("git\nstatus\n  --short"),
+            "git status --short"
+        );
+    }
+
+    #[test]
+    fn display_command_empty_string() {
+        assert_eq!(display_command(""), "");
+    }
+
+    #[test]
+    fn display_command_plain_command_unchanged() {
+        assert_eq!(display_command("ls -la"), "ls -la");
     }
 }
