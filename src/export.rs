@@ -173,23 +173,22 @@ pub fn render_script(rows: &[ExportRow], meta: &ExportMeta<'_>, now: i64) -> Str
     out
 }
 
-pub fn render_replay_script(rows: &[ExportRow]) -> String {
-    let mut out = String::new();
-    out.push_str("#!/usr/bin/env bash\n");
-    out.push_str("(\n");
-    out.push_str("set -e\n");
-    for row in rows {
-        let escaped_dir = row.directory.replace('\'', "'\\''");
-        out.push_str(&format!("cd '{escaped_dir}'\n"));
-        let escaped_cmd = row.command.replace('\'', "'\\''");
-        out.push_str(&format!(
-            "printf '\\033[36m> %s\\033[0m\\n' '{escaped_cmd}'\n"
-        ));
-        out.push_str(&row.command);
-        out.push('\n');
+pub fn render_replay_command(rows: &[ExportRow]) -> String {
+    if rows.is_empty() {
+        return "true".to_string();
     }
-    out.push_str(")\n");
-    out
+    let mut parts: Vec<String> = Vec::new();
+    let mut prev_dir: Option<&str> = None;
+    for row in rows {
+        if prev_dir != Some(row.directory.as_str()) {
+            let escaped_dir = row.directory.replace('\'', "'\\''");
+            parts.push(format!("cd '{escaped_dir}'"));
+            prev_dir = Some(row.directory.as_str());
+        }
+        parts.push(row.command.clone());
+    }
+    let joined = parts.join(" && \\\n");
+    format!("( {joined} )")
 }
 
 #[cfg(test)]
@@ -661,46 +660,14 @@ mod tests {
     }
 
     #[test]
-    fn render_replay_script_starts_with_shebang_and_set_e() {
+    fn render_replay_command_empty_rows_returns_true() {
         let rows: Vec<ExportRow> = vec![];
-        let out = render_replay_script(&rows);
-        assert!(
-            out.starts_with("#!/usr/bin/env bash\n"),
-            "must start with shebang"
-        );
-        assert!(out.contains("set -e\n"), "must include set -e");
+        let out = render_replay_command(&rows);
+        assert_eq!(out, "true");
     }
 
     #[test]
-    fn render_replay_script_empty_rows_only_shebang_and_set_e() {
-        let rows: Vec<ExportRow> = vec![];
-        let out = render_replay_script(&rows);
-        let lines: Vec<&str> = out.lines().collect();
-        assert_eq!(lines, vec!["#!/usr/bin/env bash", "(", "set -e", ")"]);
-    }
-
-    #[test]
-    fn render_replay_script_wraps_body_in_subshell() {
-        let rows = vec![ExportRow {
-            command: "z somewhere".into(),
-            directory: "/tmp".into(),
-            timestamp: 1_000,
-            exit_code: 0,
-            duration_ms: 100,
-        }];
-        let out = render_replay_script(&rows);
-        assert!(
-            out.contains("(\nset -e\n"),
-            "set -e inside the subshell; got:\n{out}"
-        );
-        assert!(
-            out.trim_end().ends_with(')'),
-            "body wrapped in a subshell; got:\n{out}"
-        );
-    }
-
-    #[test]
-    fn render_replay_script_cd_before_each_command() {
+    fn render_replay_command_single_row_wraps_in_subshell() {
         let rows = vec![ExportRow {
             command: "cargo build".into(),
             directory: "/home/user/proj".into(),
@@ -708,87 +675,52 @@ mod tests {
             exit_code: 0,
             duration_ms: 100,
         }];
-        let out = render_replay_script(&rows);
+        let out = render_replay_command(&rows);
+        assert!(out.starts_with("( "), "must start with '( '; got:\n{out}");
+        assert!(out.ends_with(" )"), "must end with ' )'; got:\n{out}");
         assert!(
-            out.contains("cd '/home/user/proj'\n"),
-            "must emit cd line; got:\n{out}"
+            out.contains("cd '/home/user/proj'"),
+            "must contain cd; got:\n{out}"
         );
         assert!(
-            out.contains("cargo build\n"),
-            "must emit command; got:\n{out}"
+            out.contains("cargo build"),
+            "must contain command; got:\n{out}"
         );
-        let cd_pos = out.find("cd '/home/user/proj'").unwrap();
+        let cd_pos = out.find("cd '").unwrap();
         let cmd_pos = out.find("cargo build").unwrap();
-        assert!(cd_pos < cmd_pos, "cd must come before the command");
+        assert!(cd_pos < cmd_pos, "cd must come before command");
     }
 
     #[test]
-    fn render_replay_script_echoes_each_command_before_running() {
-        let rows = vec![ExportRow {
-            command: "z somewhere".into(),
-            directory: "/tmp".into(),
-            timestamp: 1_000,
-            exit_code: 0,
-            duration_ms: 100,
-        }];
-        let out = render_replay_script(&rows);
-        let echo_pos = out.find("printf").expect("must echo the command");
-        let run_pos = out.rfind("z somewhere\n").expect("must run the command");
-        assert!(
-            echo_pos < run_pos,
-            "echo must come before running; got:\n{out}"
-        );
-        assert!(
-            out.contains("'z somewhere'"),
-            "echoes the command text; got:\n{out}"
-        );
-    }
-
-    #[test]
-    fn render_replay_script_escapes_single_quote_in_directory() {
-        let rows = vec![ExportRow {
-            command: "ls".into(),
-            directory: "/home/it's/project".into(),
-            timestamp: 1_000,
-            exit_code: 0,
-            duration_ms: 100,
-        }];
-        let out = render_replay_script(&rows);
-        assert!(
-            out.contains("cd '/home/it'\\''s/project'\n"),
-            "must escape single quote in dir; got:\n{out}"
-        );
-    }
-
-    #[test]
-    fn render_replay_script_preserves_command_order() {
+    fn render_replay_command_two_rows_same_dir_single_cd() {
         let rows = vec![
             ExportRow {
                 command: "first_cmd".into(),
-                directory: "/a".into(),
+                directory: "/shared".into(),
                 timestamp: 1_000,
                 exit_code: 0,
                 duration_ms: 100,
             },
             ExportRow {
                 command: "second_cmd".into(),
-                directory: "/b".into(),
+                directory: "/shared".into(),
                 timestamp: 2_000,
                 exit_code: 0,
                 duration_ms: 100,
             },
         ];
-        let out = render_replay_script(&rows);
-        let first_pos = out.find("first_cmd").unwrap();
-        let second_pos = out.find("second_cmd").unwrap();
-        assert!(
-            first_pos < second_pos,
-            "first_cmd must appear before second_cmd"
+        let out = render_replay_command(&rows);
+        let cd_count = out.matches("cd '").count();
+        assert_eq!(
+            cd_count, 1,
+            "same dir must produce only one cd; got:\n{out}"
         );
+        assert!(out.contains("first_cmd"), "must contain first_cmd");
+        assert!(out.contains("second_cmd"), "must contain second_cmd");
     }
 
     #[test]
-    fn render_replay_script_two_rows_has_two_cd_lines() {
+    fn render_replay_command_two_rows_different_dirs_two_cds() {
         let rows = vec![
             ExportRow {
                 command: "cmd-a".into(),
@@ -805,13 +737,81 @@ mod tests {
                 duration_ms: 100,
             },
         ];
-        let out = render_replay_script(&rows);
+        let out = render_replay_command(&rows);
         let cd_count = out.matches("cd '").count();
         assert_eq!(
             cd_count, 2,
-            "two rows must produce two cd lines; got:\n{out}"
+            "different dirs must produce two cds; got:\n{out}"
         );
-        assert!(out.contains("cd '/dir-a'\n"));
-        assert!(out.contains("cd '/dir-b'\n"));
+        assert!(out.contains("cd '/dir-a'"), "must contain cd /dir-a");
+        assert!(out.contains("cd '/dir-b'"), "must contain cd /dir-b");
+    }
+
+    #[test]
+    fn render_replay_command_preserves_order() {
+        let rows = vec![
+            ExportRow {
+                command: "first_cmd".into(),
+                directory: "/a".into(),
+                timestamp: 1_000,
+                exit_code: 0,
+                duration_ms: 100,
+            },
+            ExportRow {
+                command: "second_cmd".into(),
+                directory: "/b".into(),
+                timestamp: 2_000,
+                exit_code: 0,
+                duration_ms: 100,
+            },
+        ];
+        let out = render_replay_command(&rows);
+        let first_pos = out.find("first_cmd").unwrap();
+        let second_pos = out.find("second_cmd").unwrap();
+        assert!(
+            first_pos < second_pos,
+            "first_cmd must appear before second_cmd"
+        );
+    }
+
+    #[test]
+    fn render_replay_command_escapes_single_quote_in_dir() {
+        let rows = vec![ExportRow {
+            command: "ls".into(),
+            directory: "/home/it's/project".into(),
+            timestamp: 1_000,
+            exit_code: 0,
+            duration_ms: 100,
+        }];
+        let out = render_replay_command(&rows);
+        assert!(
+            out.contains("cd '/home/it'\\''s/project'"),
+            "must escape single quote in dir; got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_replay_command_uses_ampersand_continuation() {
+        let rows = vec![
+            ExportRow {
+                command: "cmd-a".into(),
+                directory: "/d".into(),
+                timestamp: 1_000,
+                exit_code: 0,
+                duration_ms: 100,
+            },
+            ExportRow {
+                command: "cmd-b".into(),
+                directory: "/d".into(),
+                timestamp: 2_000,
+                exit_code: 0,
+                duration_ms: 100,
+            },
+        ];
+        let out = render_replay_command(&rows);
+        assert!(
+            out.contains(" && \\\n"),
+            "parts must be joined with ' && \\\\n'; got:\n{out}"
+        );
     }
 }

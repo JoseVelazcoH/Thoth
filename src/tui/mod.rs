@@ -160,24 +160,16 @@ pub fn run(
         };
         let rows = export::collect(conn, &args, now)
             .map_err(|e| ThothError::Tui(format!("replay collect failed: {e}")))?;
-        let script = export::render_replay_script(&rows);
-        let path =
-            std::env::temp_dir().join(format!("tth-replay-{}-{}.sh", std::process::id(), now));
-        std::fs::write(&path, script)
-            .map_err(|e| ThothError::Tui(format!("replay write failed: {e}")))?;
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| ThothError::Tui("replay path is not valid UTF-8".into()))?
-            .to_string();
+        let cmd = export::render_replay_command(&rows);
         if std::io::stdout().is_terminal() {
             println!("Replaying workspace '{ws_name}'...");
-            let shell = std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string());
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "bash".into());
             std::process::Command::new(shell)
-                .args(["-i", "-c", &format!("source '{path_str}'")])
+                .args(["-i", "-c", &cmd])
                 .status()
                 .map_err(|e| ThothError::Tui(format!("replay run failed: {e}")))?;
         } else {
-            app.action = Some(Action::Replay(path_str));
+            app.action = Some(Action::Replay(cmd));
         }
     }
 

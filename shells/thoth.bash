@@ -67,7 +67,7 @@ _tth_widget() {
         READLINE_LINE="${out#EDIT:}"
         READLINE_POINT=${#READLINE_LINE}
     elif [[ "$out" == REPLAY:* ]]; then
-        source "${out#REPLAY:}"
+        eval "${out#REPLAY:}"
     fi
 }
 
