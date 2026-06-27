@@ -474,6 +474,7 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                 project: args.project.clone(),
                 since: args.since,
                 exit: args.exit,
+                workspace: None,
             };
             let rows = crate::export::collect(&conn, &export_args, now)?;
             let meta = crate::export::ExportMeta {

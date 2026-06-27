@@ -1,8 +1,8 @@
 use ratatui::{
-    layout::{Alignment, Constraint, Layout},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState},
+    widgets::{Block, BorderType, Borders, Cell, Clear, Paragraph, Row, Table, TableState},
     Frame,
 };
 
@@ -485,6 +485,10 @@ pub fn draw(
         }
     }
 
+    if app.confirm.is_some() {
+        render_confirm_modal(frame, middle_area, app);
+    }
+
     let query_text = format!("> {}", app.query);
     frame.render_widget(Paragraph::new(query_text), query_area);
 
@@ -524,6 +528,9 @@ pub fn draw(
             Span::styled("↑↓", accent_style),
             Span::styled(" workspace", dim_style),
             Span::styled(" · ", dim_style),
+            Span::styled("↵", accent_style),
+            Span::styled(" replay", dim_style),
+            Span::styled(" · ", dim_style),
             Span::styled("esc", accent_style),
             Span::styled(" quit", dim_style),
         ]),
@@ -536,8 +543,52 @@ pub fn format_action_line(action: Option<&crate::tui::app::Action>) -> Option<St
     match action {
         Some(Action::Run(cmd)) => Some(format!("RUN:{cmd}")),
         Some(Action::Edit(cmd)) => Some(format!("EDIT:{cmd}")),
+        Some(Action::Replay(path)) => Some(format!("REPLAY:{path}")),
         None => None,
     }
+}
+
+fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    Rect {
+        x,
+        y,
+        width: width.min(area.width),
+        height: height.min(area.height),
+    }
+}
+
+fn render_confirm_modal(frame: &mut Frame, area: Rect, app: &crate::tui::app::App) {
+    let Some(confirm) = &app.confirm else { return };
+    let dim_style = Style::default().fg(DIM_COLOR);
+    let accent_style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+
+    let modal_w = 50u16;
+    let modal_h = 4u16;
+    let modal_area = centered_rect(modal_w, modal_h, area);
+
+    frame.render_widget(Clear, modal_area);
+
+    let ws_name = truncate(&confirm.workspace, 20);
+    let title = format!(" Replay '{ws_name}' ({} commands)? ", confirm.count);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(ACCENT))
+        .title(Span::styled(title, accent_style));
+
+    let inner = block.inner(modal_area);
+    frame.render_widget(block, modal_area);
+
+    let hint = Paragraph::new(Line::from(vec![
+        Span::styled("[y]", accent_style),
+        Span::styled(" run all   ", dim_style),
+        Span::styled("[n]", accent_style),
+        Span::styled(" cancel", dim_style),
+    ]))
+    .alignment(Alignment::Center);
+    frame.render_widget(hint, inner);
 }
 
 #[cfg(test)]
@@ -1716,6 +1767,49 @@ mod tests {
             .iter()
             .any(|l| l.contains("exit") && l.contains("command")));
         assert!(lines2.iter().all(|l| !l.contains("time")));
+    }
+
+    #[test]
+    fn format_action_line_replay_produces_correct_prefix() {
+        let action = Action::Replay("/tmp/tth-replay-123.sh".to_string());
+        let result = format_action_line(Some(&action));
+        assert_eq!(result, Some("REPLAY:/tmp/tth-replay-123.sh".to_string()));
+    }
+
+    #[test]
+    fn controls_workspaces_shows_replay_hint() {
+        let app = app_with_workspaces();
+        let text = render_app(&app);
+        assert!(
+            text.contains("replay"),
+            "Workspaces controls must contain 'replay'; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn confirm_modal_shows_when_confirm_is_set() {
+        let mut app = app_with_workspaces();
+        app.confirm = Some(crate::tui::app::ConfirmReplay {
+            workspace: "proj-alpha".into(),
+            count: 5,
+        });
+        let text = render_app(&app);
+        assert!(
+            text.contains("proj-alpha"),
+            "confirm modal must show workspace name; got:\n{text}"
+        );
+        assert!(
+            text.contains("5 commands") || text.contains("5"),
+            "confirm modal must show command count; got:\n{text}"
+        );
+        assert!(
+            text.contains("[y]") || text.contains("y"),
+            "confirm modal must show y hint; got:\n{text}"
+        );
+        assert!(
+            text.contains("[n]") || text.contains("n"),
+            "confirm modal must show n hint; got:\n{text}"
+        );
     }
 
     #[test]

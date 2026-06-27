@@ -66,6 +66,8 @@ _tth_widget() {
     elif [[ "$out" == EDIT:* ]]; then
         READLINE_LINE="${out#EDIT:}"
         READLINE_POINT=${#READLINE_LINE}
+    elif [[ "$out" == REPLAY:* ]]; then
+        bash "${out#REPLAY:}"
     fi
 }
 

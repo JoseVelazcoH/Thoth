@@ -2,12 +2,37 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::tui::app::{Action, App, Tab};
 
+fn handle_confirm_key(key: crossterm::event::KeyEvent, app: &mut App) -> Outcome {
+    use crossterm::event::KeyCode;
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            let ws = app
+                .confirm
+                .as_ref()
+                .map(|c| c.workspace.clone())
+                .unwrap_or_default();
+            app.replay_workspace = Some(ws);
+            app.confirm = None;
+            Outcome::Exit
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            app.cancel_confirm();
+            Outcome::Continue
+        }
+        _ => Outcome::Continue,
+    }
+}
+
 pub enum Outcome {
     Continue,
     Exit,
 }
 
 pub fn handle_key(key: KeyEvent, app: &mut App) -> Outcome {
+    if app.confirm.is_some() {
+        return handle_confirm_key(key, app);
+    }
+
     match key.code {
         KeyCode::Esc => {
             app.action = None;
@@ -80,7 +105,10 @@ fn handle_history_key(key: KeyEvent, app: &mut App) -> Outcome {
 
 fn handle_ws_key(key: KeyEvent, app: &mut App) -> Outcome {
     match key.code {
-        KeyCode::Enter => Outcome::Continue,
+        KeyCode::Enter => {
+            app.begin_replay_confirm();
+            Outcome::Continue
+        }
         KeyCode::Up => {
             app.ws_move_up();
             Outcome::Continue
@@ -436,5 +464,97 @@ mod tests {
         assert_eq!(app.tab, Tab::History);
         handle_key(key(KeyCode::Char('g')), &mut app);
         assert_eq!(app.query, "g");
+    }
+
+    fn app_with_workspaces_and_commands() -> App {
+        let mut app = app_with_workspaces();
+        app.ws_commands = vec![crate::search::CommandRow {
+            command: "git status".into(),
+            directory: "/tmp".into(),
+            project: "p".into(),
+            session_id: "s1".into(),
+            timestamp: 1000,
+            exit_code: 0,
+            duration_ms: 100,
+            tags: "[]".into(),
+            workspace: Some("ws-new".into()),
+        }];
+        app
+    }
+
+    #[test]
+    fn ws_enter_opens_confirm_modal() {
+        let mut app = app_with_workspaces_and_commands();
+        let outcome = handle_key(key(KeyCode::Enter), &mut app);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert!(app.confirm.is_some(), "Enter must open confirm modal");
+    }
+
+    #[test]
+    fn confirm_y_sets_replay_workspace_clears_confirm_and_exits() {
+        let mut app = app_with_workspaces_and_commands();
+        handle_key(key(KeyCode::Enter), &mut app);
+        assert!(app.confirm.is_some());
+        let outcome = handle_key(key(KeyCode::Char('y')), &mut app);
+        assert!(matches!(outcome, Outcome::Exit));
+        assert!(app.confirm.is_none(), "confirm must be cleared after y");
+        assert_eq!(app.replay_workspace, Some("ws-new".into()));
+    }
+
+    #[test]
+    fn confirm_n_cancels_and_continues() {
+        let mut app = app_with_workspaces_and_commands();
+        handle_key(key(KeyCode::Enter), &mut app);
+        let outcome = handle_key(key(KeyCode::Char('n')), &mut app);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert!(app.confirm.is_none());
+        assert!(app.replay_workspace.is_none());
+    }
+
+    #[test]
+    fn confirm_esc_cancels_and_continues() {
+        let mut app = app_with_workspaces_and_commands();
+        handle_key(key(KeyCode::Enter), &mut app);
+        let outcome = handle_key(key(KeyCode::Esc), &mut app);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert!(app.confirm.is_none());
+    }
+
+    #[test]
+    fn confirm_other_key_does_not_leak_through() {
+        let mut app = app_with_workspaces_and_commands();
+        handle_key(key(KeyCode::Enter), &mut app);
+        let query_before = app.query.clone();
+        let outcome = handle_key(key(KeyCode::Char('g')), &mut app);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert_eq!(
+            app.query, query_before,
+            "typing must not leak to query while confirm is open"
+        );
+        assert!(
+            app.confirm.is_some(),
+            "confirm must stay open on unknown key"
+        );
+    }
+
+    #[test]
+    fn confirm_left_does_not_change_tab() {
+        let mut app = app_with_workspaces_and_commands();
+        handle_key(key(KeyCode::Enter), &mut app);
+        let tab_before = app.tab;
+        handle_key(key(KeyCode::Left), &mut app);
+        assert_eq!(
+            app.tab, tab_before,
+            "Left must not change tab while confirm is open"
+        );
+    }
+
+    #[test]
+    fn history_enter_still_exits_with_run_regression() {
+        let mut app = app_with_rows();
+        assert_eq!(app.tab, Tab::History);
+        let outcome = handle_key(key(KeyCode::Enter), &mut app);
+        assert!(matches!(outcome, Outcome::Exit));
+        assert!(matches!(&app.action, Some(Action::Run(_))));
     }
 }

@@ -61,6 +61,12 @@ impl FilterState {
 pub enum Action {
     Run(String),
     Edit(String),
+    Replay(String),
+}
+
+pub struct ConfirmReplay {
+    pub workspace: String,
+    pub count: usize,
 }
 
 pub struct App {
@@ -77,6 +83,8 @@ pub struct App {
     pub needs_ws_reload: bool,
     pub needs_ws_commands_reload: bool,
     pub needs_history_reload: bool,
+    pub confirm: Option<ConfirmReplay>,
+    pub replay_workspace: Option<String>,
 }
 
 impl Default for App {
@@ -101,7 +109,21 @@ impl App {
             needs_ws_reload: false,
             needs_ws_commands_reload: false,
             needs_history_reload: false,
+            confirm: None,
+            replay_workspace: None,
         }
+    }
+
+    pub fn begin_replay_confirm(&mut self) {
+        if let Some(ws) = self.selected_workspace() {
+            let workspace = ws.name.clone();
+            let count = self.ws_commands.len();
+            self.confirm = Some(ConfirmReplay { workspace, count });
+        }
+    }
+
+    pub fn cancel_confirm(&mut self) {
+        self.confirm = None;
     }
 
     pub fn prev_tab(&mut self) {
@@ -516,5 +538,56 @@ mod tests {
     fn selected_command_none_when_empty() {
         let app = App::new();
         assert!(app.selected_command().is_none());
+    }
+
+    fn app_with_ws(name: &str, cmd_count: usize) -> App {
+        let mut app = App::new();
+        app.tab = crate::tui::app::Tab::Workspaces;
+        app.workspaces = vec![WorkspaceRow {
+            name: name.into(),
+            command_count: cmd_count as i64,
+            first_ts: 1000,
+            last_ts: 2000,
+        }];
+        app.ws_selected = 0;
+        app.ws_commands = (0..cmd_count)
+            .map(|i| crate::search::CommandRow {
+                command: format!("cmd-{i}"),
+                directory: "/tmp".into(),
+                project: "p".into(),
+                session_id: "s1".into(),
+                timestamp: 1000 + i as i64,
+                exit_code: 0,
+                duration_ms: 100,
+                tags: "[]".into(),
+                workspace: Some(name.into()),
+            })
+            .collect();
+        app
+    }
+
+    #[test]
+    fn begin_replay_confirm_sets_confirm_with_workspace_and_count() {
+        let mut app = app_with_ws("demo", 3);
+        app.begin_replay_confirm();
+        let c = app.confirm.as_ref().unwrap();
+        assert_eq!(c.workspace, "demo");
+        assert_eq!(c.count, 3);
+    }
+
+    #[test]
+    fn begin_replay_confirm_no_workspace_does_nothing() {
+        let mut app = App::new();
+        app.begin_replay_confirm();
+        assert!(app.confirm.is_none());
+    }
+
+    #[test]
+    fn cancel_confirm_clears_confirm() {
+        let mut app = app_with_ws("ws-x", 2);
+        app.begin_replay_confirm();
+        assert!(app.confirm.is_some());
+        app.cancel_confirm();
+        assert!(app.confirm.is_none());
     }
 }

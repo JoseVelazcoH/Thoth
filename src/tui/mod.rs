@@ -16,8 +16,9 @@ use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
 use rusqlite::Connection;
 
 use crate::error::ThothError;
+use crate::export::{self, ExportArgs};
 use crate::search::Column;
-use crate::tui::app::App;
+use crate::tui::app::{Action, App};
 use crate::tui::event::{handle_key, Outcome};
 use crate::tui::render::format_action_line;
 
@@ -113,6 +114,29 @@ pub fn run(
     }
 
     drop(_guard);
+
+    if let Some(ws_name) = app.replay_workspace.take() {
+        let args = ExportArgs {
+            workspace: Some(ws_name.clone()),
+            session: None,
+            tag: vec![],
+            project: None,
+            since: None,
+            exit: None,
+        };
+        let rows = export::collect(conn, &args, now)
+            .map_err(|e| ThothError::Tui(format!("replay collect failed: {e}")))?;
+        let script = export::render_replay_script(&rows);
+        let path =
+            std::env::temp_dir().join(format!("tth-replay-{}-{}.sh", std::process::id(), now));
+        std::fs::write(&path, script)
+            .map_err(|e| ThothError::Tui(format!("replay write failed: {e}")))?;
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| ThothError::Tui("replay path is not valid UTF-8".into()))?
+            .to_string();
+        app.action = Some(Action::Replay(path_str));
+    }
 
     if let Some(line) = format_action_line(app.action.as_ref()) {
         println!("{line}");
