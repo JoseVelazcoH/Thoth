@@ -2,6 +2,7 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use rusqlite::Connection;
 use tempfile::TempDir;
+use std::path::PathBuf;
 
 fn tth() -> Command {
     Command::cargo_bin("tth").unwrap()
@@ -436,4 +437,74 @@ fn record_never_fail_contract_preserved() {
         .args(["record", "--cmd", "whoami"])
         .assert()
         .code(0);
+}
+
+fn tth_with_env(db_path: &PathBuf, error_log: &PathBuf) -> Command {
+    let mut cmd = tth();
+    cmd.env("THOTH_DB", db_path.to_str().unwrap())
+        .env("THOTH_ERROR_LOG", error_log.to_str().unwrap());
+    cmd
+}
+
+#[test]
+fn prompt_framework_starship_prints_env_var_module() {
+    let dir = TempDir::new().unwrap();
+    tth_with_env(&dir.path().join("h.db"), &dir.path().join("e.log"))
+        .args(["prompt", "--framework", "starship"])
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("env_var.thoth_tags"))
+        .stdout(predicate::str::contains("TTH_PROMPT_TAGS"));
+}
+
+#[test]
+fn prompt_unknown_framework_exits_nonzero() {
+    let dir = TempDir::new().unwrap();
+    tth_with_env(&dir.path().join("h.db"), &dir.path().join("e.log"))
+        .args(["prompt", "--framework", "fish"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown framework"));
+}
+
+#[test]
+fn prompt_framework_generic_prints_generic_snippet() {
+    let dir = TempDir::new().unwrap();
+    tth_with_env(&dir.path().join("h.db"), &dir.path().join("e.log"))
+        .args(["prompt", "--framework", "generic"])
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("PROMPT").or(predicate::str::contains("PS1")));
+}
+
+#[test]
+fn install_output_includes_prompt_hint() {
+    let dir = TempDir::new().unwrap();
+    let rc = dir.path().join(".bashrc");
+    tth_with_env(&dir.path().join("h.db"), &dir.path().join("e.log"))
+        .args([
+            "install",
+            "--shell",
+            "bash",
+            "--rc-file",
+            rc.to_str().unwrap(),
+        ])
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("To show active tags in your prompt:"));
+}
+
+#[test]
+fn doctor_exits_0_and_prints_checklist() {
+    let dir = TempDir::new().unwrap();
+    tth_with_env(&dir.path().join("h.db"), &dir.path().join("e.log"))
+        .args(["doctor"])
+        .assert()
+        .code(0)
+        .stdout(
+            predicate::str::contains("hooks installed")
+                .and(predicate::str::contains("database"))
+                .and(predicate::str::contains("tth on PATH"))
+                .and(predicate::str::contains("prompt tags visibility")),
+        );
 }
