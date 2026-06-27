@@ -7,9 +7,9 @@ use ratatui::{
 };
 
 use crate::search::{Column, CommandRow};
-use crate::sessions::SessionRow;
 use crate::tui::app::{App, Tab};
 use crate::tui::time::format_relative;
+use crate::workspaces::WorkspaceRow;
 
 const ACCENT: Color = Color::Cyan;
 const DIM_COLOR: Color = Color::DarkGray;
@@ -169,15 +169,15 @@ fn render_tab_bar(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
     let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
     let active_style = accent_style.add_modifier(Modifier::REVERSED);
 
-    let (history_style, sessions_style) = match app.tab {
+    let (history_style, workspaces_style) = match app.tab {
         Tab::History => (active_style, dim_style),
-        Tab::Sessions => (dim_style, active_style),
+        Tab::Workspaces => (dim_style, active_style),
     };
 
     let line = Line::from(vec![
         Span::styled(" History ", history_style),
         Span::styled("  ", dim_style),
-        Span::styled(" Sessions ", sessions_style),
+        Span::styled(" Workspaces ", workspaces_style),
     ]);
     frame.render_widget(Paragraph::new(line), area);
 }
@@ -306,7 +306,7 @@ fn render_history_pane(
     frame.render_stateful_widget(table, inner_list_area, table_state);
 }
 
-fn render_sessions_pane(
+fn render_workspaces_pane(
     frame: &mut Frame,
     area: ratatui::layout::Rect,
     app: &App,
@@ -324,36 +324,32 @@ fn render_sessions_pane(
     let left_area = h_chunks[0];
     let right_area = h_chunks[1];
 
-    let sessions_block = Block::default()
+    let workspaces_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style)
-        .title(Span::styled(" sessions ", dim_style));
+        .title(Span::styled(" workspaces ", dim_style));
 
-    let inner_left = sessions_block.inner(left_area);
-    frame.render_widget(sessions_block, left_area);
+    let inner_left = workspaces_block.inner(left_area);
+    frame.render_widget(workspaces_block, left_area);
 
-    if app.sessions.is_empty() {
-        let empty = Paragraph::new("no sessions").style(dim_style);
+    if app.workspaces.is_empty() {
+        let empty = Paragraph::new("no workspaces").style(dim_style);
         frame.render_widget(empty, inner_left);
     } else {
-        let rows: Vec<Row> = app.sessions.iter().map(|s| session_row(s, now)).collect();
+        let rows: Vec<Row> = app.workspaces.iter().map(|w| ws_row(w, now)).collect();
 
         let widths = vec![
-            Constraint::Length(9),
-            Constraint::Length(16),
             Constraint::Min(1),
+            Constraint::Length(6),
+            Constraint::Length(9),
         ];
 
         let table = Table::new(rows, widths)
             .block(Block::default())
             .row_highlight_style(highlight_style);
 
-        if app.sessions.is_empty() {
-            table_state.select(None);
-        } else {
-            table_state.select(Some(app.session_selected));
-        }
+        table_state.select(Some(app.ws_selected));
         frame.render_stateful_widget(table, inner_left, table_state);
     }
 
@@ -366,12 +362,12 @@ fn render_sessions_pane(
     let inner_right = commands_block.inner(right_area);
     frame.render_widget(commands_block, right_area);
 
-    if app.session_commands.is_empty() {
+    if app.ws_commands.is_empty() {
         let empty = Paragraph::new("no commands").style(dim_style);
         frame.render_widget(empty, inner_right);
     } else {
         let rows: Vec<Row> = app
-            .session_commands
+            .ws_commands
             .iter()
             .map(|cmd| {
                 let time_text = truncate(&format_relative(cmd.timestamp, now), 9);
@@ -402,14 +398,14 @@ fn render_sessions_pane(
     }
 }
 
-fn session_row(s: &SessionRow, now: i64) -> Row<'static> {
-    let time_text = truncate(&format_relative(s.started_at, now), 9);
-    let project_text = truncate(&s.project, 16);
-    let count_text = s.command_count.to_string();
+fn ws_row(w: &WorkspaceRow, now: i64) -> Row<'static> {
+    let name_text = truncate(&w.name, 20);
+    let count_text = w.command_count.to_string();
+    let last_text = truncate(&format_relative(w.last_ts, now), 9);
     Row::new(vec![
-        Cell::from(Span::styled(time_text, Style::default().fg(DIM_COLOR))),
-        Cell::from(Span::styled(project_text, Style::default().fg(Color::Blue))),
-        Cell::from(count_text),
+        Cell::from(Span::styled(name_text, Style::default().fg(Color::Blue))),
+        Cell::from(Span::styled(count_text, Style::default().fg(DIM_COLOR))),
+        Cell::from(Span::styled(last_text, Style::default().fg(DIM_COLOR))),
     ])
 }
 
@@ -484,8 +480,8 @@ pub fn draw(
                 table_state,
             );
         }
-        Tab::Sessions => {
-            render_sessions_pane(frame, middle_area, app, now, table_state);
+        Tab::Workspaces => {
+            render_workspaces_pane(frame, middle_area, app, now, table_state);
         }
     }
 
@@ -521,15 +517,12 @@ pub fn draw(
             Span::styled("esc", accent_style),
             Span::styled(" quit", dim_style),
         ]),
-        Tab::Sessions => Line::from(vec![
+        Tab::Workspaces => Line::from(vec![
             Span::styled(" ←→", accent_style),
             Span::styled(" tabs", dim_style),
             Span::styled(" · ", dim_style),
             Span::styled("↑↓", accent_style),
-            Span::styled(" session", dim_style),
-            Span::styled(" · ", dim_style),
-            Span::styled("↵", accent_style),
-            Span::styled(" open", dim_style),
+            Span::styled(" workspace", dim_style),
             Span::styled(" · ", dim_style),
             Span::styled("esc", accent_style),
             Span::styled(" quit", dim_style),
@@ -551,8 +544,8 @@ pub fn format_action_line(action: Option<&crate::tui::app::Action>) -> Option<St
 mod tests {
     use super::*;
     use crate::config::default_tui_columns;
-    use crate::sessions::SessionRow;
     use crate::tui::app::{Action, App, Tab};
+    use crate::workspaces::WorkspaceRow;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -574,14 +567,12 @@ mod tests {
         }
     }
 
-    fn make_session(id: &str, project: &str, started_at: i64, count: i64) -> SessionRow {
-        SessionRow {
-            id: id.to_string(),
-            project: project.to_string(),
-            started_at,
-            ended_at: started_at + 3600,
+    fn make_workspace(name: &str, count: i64, last_ts: i64) -> WorkspaceRow {
+        WorkspaceRow {
+            name: name.to_string(),
             command_count: count,
-            tags: vec![],
+            first_ts: last_ts - 3600,
+            last_ts,
         }
     }
 
@@ -631,15 +622,15 @@ mod tests {
         app
     }
 
-    fn app_with_sessions() -> App {
+    fn app_with_workspaces() -> App {
         let mut app = App::new();
-        app.tab = Tab::Sessions;
-        app.sessions = vec![
-            make_session("session-abc-123", "proj-alpha", TEST_NOW - 3600, 5),
-            make_session("session-def-456", "proj-beta", TEST_NOW - 7200, 3),
+        app.tab = Tab::Workspaces;
+        app.workspaces = vec![
+            make_workspace("proj-alpha", 5, TEST_NOW - 3600),
+            make_workspace("proj-beta", 3, TEST_NOW - 7200),
         ];
-        app.session_selected = 0;
-        app.session_commands = vec![
+        app.ws_selected = 0;
+        app.ws_commands = vec![
             make_row("git status", TEST_NOW - 3500, 0, "proj-alpha"),
             make_row("cargo build", TEST_NOW - 3400, 0, "proj-alpha"),
         ];
@@ -651,7 +642,10 @@ mod tests {
         let app = app_with_rows();
         let text = render_app(&app);
         assert!(text.contains("History"), "tab bar must show 'History'");
-        assert!(text.contains("Sessions"), "tab bar must show 'Sessions'");
+        assert!(
+            text.contains("Workspaces"),
+            "tab bar must show 'Workspaces'"
+        );
     }
 
     #[test]
@@ -725,22 +719,22 @@ mod tests {
     }
 
     #[test]
-    fn sessions_tab_renders_two_panes() {
-        let app = app_with_sessions();
+    fn workspaces_tab_renders_two_panes() {
+        let app = app_with_workspaces();
         let text = render_app(&app);
         assert!(
-            text.contains("sessions"),
-            "Sessions tab must show 'sessions' pane title"
+            text.contains("workspaces"),
+            "Workspaces tab must show 'workspaces' pane title"
         );
         assert!(
             text.contains("commands"),
-            "Sessions tab must show 'commands' pane title"
+            "Workspaces tab must show 'commands' pane title"
         );
     }
 
     #[test]
-    fn sessions_tab_shows_session_row_highlighted() {
-        let app = app_with_sessions();
+    fn workspaces_tab_shows_workspace_row_highlighted() {
+        let app = app_with_workspaces();
         let buf = render_app_buf(&app);
 
         let any_reversed = (0..TEST_HEIGHT).any(|row_y| {
@@ -753,17 +747,17 @@ mod tests {
         });
         assert!(
             any_reversed,
-            "Sessions tab must have REVERSED on selected row"
+            "Workspaces tab must have REVERSED on selected row"
         );
     }
 
     #[test]
-    fn sessions_tab_shows_command_text() {
-        let app = app_with_sessions();
+    fn workspaces_tab_shows_command_text() {
+        let app = app_with_workspaces();
         let text = render_app(&app);
         assert!(
             text.contains("git status"),
-            "Sessions tab right pane must show session command text"
+            "Workspaces tab right pane must show workspace command text"
         );
     }
 
@@ -802,22 +796,25 @@ mod tests {
     }
 
     #[test]
-    fn controls_sessions_shows_session_and_open() {
-        let app = app_with_sessions();
+    fn controls_workspaces_shows_workspace_and_quit() {
+        let app = app_with_workspaces();
         let text = render_app(&app);
         assert!(
-            text.contains("session"),
-            "Sessions controls must contain 'session'"
+            text.contains("workspace"),
+            "Workspaces controls must contain 'workspace'"
         );
         assert!(
-            text.contains("open"),
-            "Sessions controls must contain 'open'"
+            !text.contains("open"),
+            "Workspaces controls must NOT contain 'open' in PR2"
         );
         assert!(
             text.contains("quit"),
-            "Sessions controls must contain 'quit'"
+            "Workspaces controls must contain 'quit'"
         );
-        assert!(text.contains("tabs"), "Sessions controls must hint 'tabs'");
+        assert!(
+            text.contains("tabs"),
+            "Workspaces controls must hint 'tabs'"
+        );
     }
 
     #[test]
@@ -1722,19 +1719,19 @@ mod tests {
     }
 
     #[test]
-    fn dump_sessions_tab_buffer() {
+    fn dump_workspaces_tab_buffer() {
         const NOW: i64 = 1_000_000_000;
         const W: u16 = 100;
         const H: u16 = 16;
 
         let mut app = App::new();
-        app.tab = Tab::Sessions;
-        app.sessions = vec![
-            make_session("abc123def456", "proj-alpha", NOW - 3600, 5),
-            make_session("xyz789uvw012", "proj-beta", NOW - 7200, 3),
+        app.tab = Tab::Workspaces;
+        app.workspaces = vec![
+            make_workspace("proj-alpha", 5, NOW - 3600),
+            make_workspace("proj-beta", 3, NOW - 7200),
         ];
-        app.session_selected = 0;
-        app.session_commands = vec![
+        app.ws_selected = 0;
+        app.ws_commands = vec![
             make_row("git status", NOW - 3500, 0, "proj-alpha"),
             make_row("cargo build --release", NOW - 3400, 0, "proj-alpha"),
             make_row("cargo test", NOW - 3200, 1, "proj-alpha"),
@@ -1757,10 +1754,10 @@ mod tests {
             lines.push(line.trim_end().to_string());
         }
         let text = lines.join("\n");
-        println!("=== SESSIONS TAB (100x16) ===");
+        println!("=== WORKSPACES TAB (100x16) ===");
         println!("{text}");
 
-        assert!(text.contains("sessions"), "must show sessions pane");
+        assert!(text.contains("workspaces"), "must show workspaces pane");
         assert!(text.contains("commands"), "must show commands pane");
     }
 }
