@@ -3,8 +3,8 @@ use rusqlite::Connection;
 use crate::cli::SearchArgs;
 use crate::error::ThothError;
 use crate::search::{CommandRow, ExitFilter};
-use crate::sessions::{list_sessions, SessionRow, SessionsArgs};
 use crate::tui::fuzzy;
+use crate::workspaces::WorkspaceRow;
 
 const TUI_LIMIT: usize = 5000;
 
@@ -12,7 +12,7 @@ const TUI_LIMIT: usize = 5000;
 pub enum Tab {
     #[default]
     History,
-    Sessions,
+    Workspaces,
 }
 
 pub struct FilterState {
@@ -71,11 +71,11 @@ pub struct App {
     pub filters: FilterState,
     pub action: Option<Action>,
     pub tab: Tab,
-    pub sessions: Vec<SessionRow>,
-    pub session_selected: usize,
-    pub session_commands: Vec<CommandRow>,
-    pub needs_session_reload: bool,
-    pub needs_session_commands_reload: bool,
+    pub workspaces: Vec<WorkspaceRow>,
+    pub ws_selected: usize,
+    pub ws_commands: Vec<CommandRow>,
+    pub needs_ws_reload: bool,
+    pub needs_ws_commands_reload: bool,
     pub needs_history_reload: bool,
 }
 
@@ -95,11 +95,11 @@ impl App {
             filters: FilterState::new(),
             action: None,
             tab: Tab::History,
-            sessions: vec![],
-            session_selected: 0,
-            session_commands: vec![],
-            needs_session_reload: false,
-            needs_session_commands_reload: false,
+            workspaces: vec![],
+            ws_selected: 0,
+            ws_commands: vec![],
+            needs_ws_reload: false,
+            needs_ws_commands_reload: false,
             needs_history_reload: false,
         }
     }
@@ -110,42 +110,31 @@ impl App {
 
     pub fn next_tab(&mut self) {
         if self.tab == Tab::History {
-            self.tab = Tab::Sessions;
-            if self.sessions.is_empty() {
-                self.needs_session_reload = true;
-                self.needs_session_commands_reload = true;
+            self.tab = Tab::Workspaces;
+            if self.workspaces.is_empty() {
+                self.needs_ws_reload = true;
+                self.needs_ws_commands_reload = true;
             }
         }
     }
 
-    pub fn session_move_up(&mut self) {
-        if self.session_selected > 0 {
-            self.session_selected -= 1;
-            self.needs_session_commands_reload = true;
+    pub fn ws_move_up(&mut self) {
+        if self.ws_selected > 0 {
+            self.ws_selected -= 1;
+            self.needs_ws_commands_reload = true;
         }
     }
 
-    pub fn session_move_down(&mut self) {
-        let max = self.sessions.len().saturating_sub(1);
-        if self.session_selected < max {
-            self.session_selected += 1;
-            self.needs_session_commands_reload = true;
+    pub fn ws_move_down(&mut self) {
+        let max = self.workspaces.len().saturating_sub(1);
+        if self.ws_selected < max {
+            self.ws_selected += 1;
+            self.needs_ws_commands_reload = true;
         }
     }
 
-    pub fn selected_session(&self) -> Option<&SessionRow> {
-        self.sessions.get(self.session_selected)
-    }
-
-    pub fn open_session(&mut self) {
-        if let Some(s) = self.selected_session() {
-            let id = s.id.clone();
-            self.filters.session = Some(id);
-            self.tab = Tab::History;
-            self.query.clear();
-            self.selected = 0;
-            self.needs_history_reload = true;
-        }
+    pub fn selected_workspace(&self) -> Option<&WorkspaceRow> {
+        self.workspaces.get(self.ws_selected)
     }
 
     pub fn reload(&mut self, conn: &Connection, now: i64) -> Result<(), ThothError> {
@@ -155,46 +144,25 @@ impl App {
         Ok(())
     }
 
-    pub fn reload_sessions(&mut self, conn: &Connection, now: i64) -> Result<(), ThothError> {
-        let args = SessionsArgs {
-            project: None,
-            since: None,
-            until: None,
-            limit: TUI_LIMIT,
-        };
-        self.sessions = list_sessions(conn, &args, now)?;
-        let max = self.sessions.len().saturating_sub(1);
-        if self.session_selected > max {
-            self.session_selected = 0;
+    pub fn reload_workspaces(&mut self, conn: &Connection) -> Result<(), ThothError> {
+        self.workspaces = crate::workspaces::list_workspaces(conn)?;
+        let max = self.workspaces.len().saturating_sub(1);
+        if self.ws_selected > max {
+            self.ws_selected = 0;
         }
-        self.needs_session_reload = false;
-        self.needs_session_commands_reload = true;
+        self.needs_ws_reload = false;
+        self.needs_ws_commands_reload = true;
         Ok(())
     }
 
-    pub fn reload_session_commands(
-        &mut self,
-        conn: &Connection,
-        now: i64,
-    ) -> Result<(), ThothError> {
-        if let Some(s) = self.selected_session() {
-            let args = SearchArgs {
-                query: None,
-                project: None,
-                tag: vec![],
-                exit: None,
-                duration: None,
-                since: None,
-                until: None,
-                session: Some(s.id.clone()),
-                limit: Some(TUI_LIMIT),
-                show_session: false,
-            };
-            self.session_commands = crate::search::execute(&args, conn, now)?;
+    pub fn reload_ws_commands(&mut self, conn: &Connection) -> Result<(), ThothError> {
+        if let Some(ws) = self.selected_workspace() {
+            let name = ws.name.clone();
+            self.ws_commands = crate::workspaces::list_workspace_commands(conn, &name)?;
         } else {
-            self.session_commands.clear();
+            self.ws_commands.clear();
         }
-        self.needs_session_commands_reload = false;
+        self.needs_ws_commands_reload = false;
         Ok(())
     }
 
@@ -244,25 +212,11 @@ mod tests {
         .unwrap();
     }
 
-    fn seed_session(conn: &Connection, id: &str, project: &str, started: i64) {
+    fn seed_ws_command(conn: &Connection, ws: &str, cmd: &str, ts: i64) {
         conn.execute(
-            "INSERT INTO sessions(session_id, project, started_at, ended_at, command_count) \
-             VALUES(?1, ?2, ?3, ?3, 0)",
-            rusqlite::params![id, project, started],
-        )
-        .unwrap();
-    }
-
-    fn seed_command_for_session(conn: &Connection, session_id: &str, cmd: &str, ts: i64) {
-        conn.execute(
-            "INSERT INTO commands(command, directory, project, session_id, timestamp, exit_code, duration_ms, tags) \
-             VALUES(?1, '/tmp', 'p', ?2, ?3, 0, 100, '[]')",
-            rusqlite::params![cmd, session_id, ts],
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE sessions SET command_count = command_count + 1 WHERE session_id = ?1",
-            rusqlite::params![session_id],
+            "INSERT INTO commands(command, directory, project, session_id, timestamp, exit_code, duration_ms, tags, workspace) \
+             VALUES(?1, '/tmp', 'p', 's1', ?2, 0, 100, '[]', ?3)",
+            rusqlite::params![cmd, ts, ws],
         )
         .unwrap();
     }
@@ -316,185 +270,137 @@ mod tests {
     }
 
     #[test]
-    fn next_tab_from_history_goes_to_sessions() {
+    fn next_tab_from_history_goes_to_workspaces() {
         let mut app = App::new();
-        app.sessions = vec![SessionRow {
-            id: "s1".into(),
-            project: "p".into(),
-            started_at: 1000,
-            ended_at: 2000,
+        app.workspaces = vec![WorkspaceRow {
+            name: "ws1".into(),
             command_count: 1,
-            tags: vec![],
+            first_ts: 1000,
+            last_ts: 2000,
         }];
         app.next_tab();
-        assert_eq!(app.tab, Tab::Sessions);
+        assert_eq!(app.tab, Tab::Workspaces);
     }
 
     #[test]
-    fn next_tab_from_sessions_stays_sessions() {
+    fn next_tab_from_workspaces_stays_workspaces() {
         let mut app = App::new();
-        app.tab = Tab::Sessions;
-        app.sessions = vec![SessionRow {
-            id: "s1".into(),
-            project: "p".into(),
-            started_at: 1000,
-            ended_at: 2000,
+        app.tab = Tab::Workspaces;
+        app.workspaces = vec![WorkspaceRow {
+            name: "ws1".into(),
             command_count: 1,
-            tags: vec![],
+            first_ts: 1000,
+            last_ts: 2000,
         }];
         app.next_tab();
-        assert_eq!(app.tab, Tab::Sessions);
+        assert_eq!(app.tab, Tab::Workspaces);
     }
 
     #[test]
-    fn prev_tab_from_sessions_goes_to_history() {
+    fn prev_tab_from_workspaces_goes_to_history() {
         let mut app = App::new();
-        app.tab = Tab::Sessions;
+        app.tab = Tab::Workspaces;
         app.prev_tab();
         assert_eq!(app.tab, Tab::History);
     }
 
     #[test]
-    fn next_tab_with_empty_sessions_sets_reload_flag() {
+    fn next_tab_with_empty_workspaces_sets_reload_flag() {
         let mut app = App::new();
-        assert!(app.sessions.is_empty());
+        assert!(app.workspaces.is_empty());
         app.next_tab();
         assert!(
-            app.needs_session_reload,
-            "must set needs_session_reload when sessions is empty"
+            app.needs_ws_reload,
+            "must set needs_ws_reload when workspaces is empty"
         );
-        assert!(app.needs_session_commands_reload);
+        assert!(app.needs_ws_commands_reload);
     }
 
     #[test]
-    fn next_tab_with_existing_sessions_does_not_set_reload_flag() {
+    fn next_tab_with_existing_workspaces_does_not_set_reload_flag() {
         let mut app = App::new();
-        app.sessions = vec![SessionRow {
-            id: "s1".into(),
-            project: "p".into(),
-            started_at: 1000,
-            ended_at: 2000,
+        app.workspaces = vec![WorkspaceRow {
+            name: "ws1".into(),
             command_count: 1,
-            tags: vec![],
+            first_ts: 1000,
+            last_ts: 2000,
         }];
         app.next_tab();
-        assert!(!app.needs_session_reload);
+        assert!(!app.needs_ws_reload);
     }
 
     #[test]
-    fn session_move_up_decreases_index() {
+    fn ws_move_up_decreases_index() {
         let mut app = App::new();
-        app.sessions = vec![
-            SessionRow {
-                id: "s1".into(),
-                project: "p".into(),
-                started_at: 2000,
-                ended_at: 3000,
-                command_count: 0,
-                tags: vec![],
+        app.workspaces = vec![
+            WorkspaceRow {
+                name: "ws-a".into(),
+                command_count: 2,
+                first_ts: 1000,
+                last_ts: 3000,
             },
-            SessionRow {
-                id: "s2".into(),
-                project: "p".into(),
-                started_at: 1000,
-                ended_at: 2000,
-                command_count: 0,
-                tags: vec![],
+            WorkspaceRow {
+                name: "ws-b".into(),
+                command_count: 1,
+                first_ts: 2000,
+                last_ts: 2000,
             },
         ];
-        app.session_selected = 1;
-        app.session_move_up();
-        assert_eq!(app.session_selected, 0);
-        assert!(app.needs_session_commands_reload);
+        app.ws_selected = 1;
+        app.ws_move_up();
+        assert_eq!(app.ws_selected, 0);
+        assert!(app.needs_ws_commands_reload);
     }
 
     #[test]
-    fn session_move_up_clamps_at_top() {
+    fn ws_move_up_clamps_at_top() {
         let mut app = App::new();
-        app.sessions = vec![SessionRow {
-            id: "s1".into(),
-            project: "p".into(),
-            started_at: 2000,
-            ended_at: 3000,
-            command_count: 0,
-            tags: vec![],
-        }];
-        app.session_selected = 0;
-        app.session_move_up();
-        assert_eq!(app.session_selected, 0);
-    }
-
-    #[test]
-    fn session_move_down_increases_index() {
-        let mut app = App::new();
-        app.sessions = vec![
-            SessionRow {
-                id: "s1".into(),
-                project: "p".into(),
-                started_at: 2000,
-                ended_at: 3000,
-                command_count: 0,
-                tags: vec![],
-            },
-            SessionRow {
-                id: "s2".into(),
-                project: "p".into(),
-                started_at: 1000,
-                ended_at: 2000,
-                command_count: 0,
-                tags: vec![],
-            },
-        ];
-        app.session_selected = 0;
-        app.session_move_down();
-        assert_eq!(app.session_selected, 1);
-        assert!(app.needs_session_commands_reload);
-    }
-
-    #[test]
-    fn session_move_down_clamps_at_bottom() {
-        let mut app = App::new();
-        app.sessions = vec![SessionRow {
-            id: "s1".into(),
-            project: "p".into(),
-            started_at: 2000,
-            ended_at: 3000,
-            command_count: 0,
-            tags: vec![],
-        }];
-        app.session_selected = 0;
-        app.session_move_down();
-        assert_eq!(app.session_selected, 0);
-    }
-
-    #[test]
-    fn open_session_sets_filter_and_tab() {
-        let mut app = App::new();
-        app.sessions = vec![SessionRow {
-            id: "session-abc".into(),
-            project: "proj".into(),
-            started_at: 1000,
-            ended_at: 2000,
+        app.workspaces = vec![WorkspaceRow {
+            name: "ws1".into(),
             command_count: 1,
-            tags: vec![],
+            first_ts: 1000,
+            last_ts: 2000,
         }];
-        app.tab = Tab::Sessions;
-        app.query = "something".into();
-        app.selected = 5;
-        app.open_session();
-        assert_eq!(app.filters.session, Some("session-abc".into()));
-        assert_eq!(app.tab, Tab::History);
-        assert_eq!(app.query, "");
-        assert_eq!(app.selected, 0);
-        assert!(app.needs_history_reload);
+        app.ws_selected = 0;
+        app.ws_move_up();
+        assert_eq!(app.ws_selected, 0);
     }
 
     #[test]
-    fn open_session_noop_when_no_sessions() {
+    fn ws_move_down_increases_index() {
         let mut app = App::new();
-        app.open_session();
-        assert!(app.filters.session.is_none());
-        assert_eq!(app.tab, Tab::History);
+        app.workspaces = vec![
+            WorkspaceRow {
+                name: "ws-a".into(),
+                command_count: 2,
+                first_ts: 1000,
+                last_ts: 3000,
+            },
+            WorkspaceRow {
+                name: "ws-b".into(),
+                command_count: 1,
+                first_ts: 2000,
+                last_ts: 2000,
+            },
+        ];
+        app.ws_selected = 0;
+        app.ws_move_down();
+        assert_eq!(app.ws_selected, 1);
+        assert!(app.needs_ws_commands_reload);
+    }
+
+    #[test]
+    fn ws_move_down_clamps_at_bottom() {
+        let mut app = App::new();
+        app.workspaces = vec![WorkspaceRow {
+            name: "ws1".into(),
+            command_count: 1,
+            first_ts: 1000,
+            last_ts: 2000,
+        }];
+        app.ws_selected = 0;
+        app.ws_move_down();
+        assert_eq!(app.ws_selected, 0);
     }
 
     #[test]
@@ -508,37 +414,52 @@ mod tests {
     }
 
     #[test]
-    fn reload_sessions_populates_sessions() {
+    fn reload_workspaces_populates_workspaces() {
         let conn = make_conn();
-        seed_session(&conn, "sid-a", "proj-a", 1000);
-        seed_session(&conn, "sid-b", "proj-b", 2000);
+        seed_ws_command(&conn, "ws-a", "cmd1", 1000);
+        seed_ws_command(&conn, "ws-b", "cmd2", 2000);
         let mut app = App::new();
-        app.reload_sessions(&conn, 9999).unwrap();
-        assert_eq!(app.sessions.len(), 2);
-        assert!(!app.needs_session_reload);
-        assert!(app.needs_session_commands_reload);
+        app.reload_workspaces(&conn).unwrap();
+        assert_eq!(app.workspaces.len(), 2);
+        assert!(!app.needs_ws_reload);
+        assert!(app.needs_ws_commands_reload);
     }
 
     #[test]
-    fn reload_session_commands_filters_by_selected_session() {
+    fn reload_ws_commands_filters_by_selected_workspace() {
         let conn = make_conn();
-        seed_session(&conn, "sid-a", "proj", 1000);
-        seed_session(&conn, "sid-b", "proj", 2000);
-        seed_command_for_session(&conn, "sid-a", "cmd-for-a", 1100);
-        seed_command_for_session(&conn, "sid-b", "cmd-for-b", 2100);
+        seed_ws_command(&conn, "ws-a", "cmd-for-a", 1100);
+        seed_ws_command(&conn, "ws-b", "cmd-for-b", 2100);
 
         let mut app = App::new();
-        app.reload_sessions(&conn, 9999).unwrap();
+        app.reload_workspaces(&conn).unwrap();
 
-        app.session_selected = 1;
-        app.reload_session_commands(&conn, 9999).unwrap();
-        assert_eq!(app.session_commands.len(), 1);
-        assert_eq!(app.session_commands[0].command, "cmd-for-a");
+        app.ws_selected = 1;
+        app.reload_ws_commands(&conn).unwrap();
+        assert_eq!(app.ws_commands.len(), 1);
+        assert_eq!(app.ws_commands[0].command, "cmd-for-a");
 
-        app.session_selected = 0;
-        app.reload_session_commands(&conn, 9999).unwrap();
-        assert_eq!(app.session_commands.len(), 1);
-        assert_eq!(app.session_commands[0].command, "cmd-for-b");
+        app.ws_selected = 0;
+        app.reload_ws_commands(&conn).unwrap();
+        assert_eq!(app.ws_commands.len(), 1);
+        assert_eq!(app.ws_commands[0].command, "cmd-for-b");
+    }
+
+    #[test]
+    fn reload_ws_commands_returns_asc_order() {
+        let conn = make_conn();
+        seed_ws_command(&conn, "ws-x", "first", 1000);
+        seed_ws_command(&conn, "ws-x", "second", 2000);
+        seed_ws_command(&conn, "ws-x", "third", 3000);
+
+        let mut app = App::new();
+        app.reload_workspaces(&conn).unwrap();
+        app.ws_selected = 0;
+        app.reload_ws_commands(&conn).unwrap();
+        assert_eq!(app.ws_commands.len(), 3);
+        assert_eq!(app.ws_commands[0].command, "first");
+        assert_eq!(app.ws_commands[1].command, "second");
+        assert_eq!(app.ws_commands[2].command, "third");
     }
 
     #[test]

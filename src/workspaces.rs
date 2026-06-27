@@ -1,4 +1,5 @@
 use crate::error::ThothError;
+use crate::search::CommandRow;
 use rusqlite::Connection;
 
 pub fn start_line(name: &str) -> String {
@@ -24,6 +25,37 @@ pub struct WorkspaceRow {
     pub command_count: i64,
     pub first_ts: i64,
     pub last_ts: i64,
+}
+
+pub fn list_workspace_commands(
+    conn: &Connection,
+    name: &str,
+) -> Result<Vec<CommandRow>, ThothError> {
+    let mut stmt = conn.prepare(
+        "SELECT c.timestamp, c.project, c.tags, c.exit_code, c.duration_ms, \
+         c.directory, c.command, c.session_id, c.workspace \
+         FROM commands c \
+         WHERE c.workspace = ? \
+         ORDER BY c.timestamp ASC, c.id ASC",
+    )?;
+    let rows = stmt.query_map([name], |row| {
+        Ok(CommandRow {
+            timestamp: row.get(0)?,
+            project: row.get(1)?,
+            tags: row.get(2)?,
+            exit_code: row.get(3)?,
+            duration_ms: row.get(4)?,
+            directory: row.get(5)?,
+            command: row.get(6)?,
+            session_id: row.get(7)?,
+            workspace: row.get(8)?,
+        })
+    })?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row?);
+    }
+    Ok(result)
 }
 
 pub fn list_workspaces(conn: &Connection) -> Result<Vec<WorkspaceRow>, ThothError> {
@@ -92,6 +124,58 @@ mod tests {
     #[test]
     fn normalize_workspace_no_trim_needed() {
         assert_eq!(normalize_workspace("ws1"), Some(String::from("ws1")));
+    }
+
+    fn seed_ws_command(conn: &Connection, ws: &str, cmd: &str, ts: i64, exit: i64) {
+        conn.execute(
+            "INSERT INTO commands(command, directory, project, session_id, timestamp, exit_code, duration_ms, tags, workspace) \
+             VALUES(?1, '/tmp', 'p', 's1', ?2, ?3, 100, '[]', ?4)",
+            rusqlite::params![cmd, ts, exit, ws],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn list_workspace_commands_empty_returns_empty() {
+        let conn = mem_conn();
+        let rows = list_workspace_commands(&conn, "ws-a").unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn list_workspace_commands_filters_by_workspace() {
+        let conn = mem_conn();
+        seed_ws_command(&conn, "ws-a", "cmd-a1", 1000, 0);
+        seed_ws_command(&conn, "ws-b", "cmd-b1", 2000, 0);
+        let rows = list_workspace_commands(&conn, "ws-a").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].command, "cmd-a1");
+    }
+
+    #[test]
+    fn list_workspace_commands_returns_asc_order() {
+        let conn = mem_conn();
+        seed_ws_command(&conn, "ws-a", "first", 1000, 0);
+        seed_ws_command(&conn, "ws-a", "second", 2000, 0);
+        seed_ws_command(&conn, "ws-a", "third", 3000, 1);
+        let rows = list_workspace_commands(&conn, "ws-a").unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].command, "first");
+        assert_eq!(rows[1].command, "second");
+        assert_eq!(rows[2].command, "third");
+    }
+
+    #[test]
+    fn list_workspace_commands_populates_all_fields() {
+        let conn = mem_conn();
+        seed_ws_command(&conn, "ws-x", "ls -la", 5000, 0);
+        let rows = list_workspace_commands(&conn, "ws-x").unwrap();
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(r.command, "ls -la");
+        assert_eq!(r.timestamp, 5000);
+        assert_eq!(r.exit_code, 0);
+        assert_eq!(r.workspace, Some("ws-x".into()));
     }
 
     #[test]

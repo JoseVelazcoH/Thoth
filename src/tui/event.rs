@@ -30,7 +30,7 @@ pub fn handle_key(key: KeyEvent, app: &mut App) -> Outcome {
 
     match app.tab {
         Tab::History => handle_history_key(key, app),
-        Tab::Sessions => handle_sessions_key(key, app),
+        Tab::Workspaces => handle_ws_key(key, app),
     }
 }
 
@@ -78,26 +78,23 @@ fn handle_history_key(key: KeyEvent, app: &mut App) -> Outcome {
     }
 }
 
-fn handle_sessions_key(key: KeyEvent, app: &mut App) -> Outcome {
+fn handle_ws_key(key: KeyEvent, app: &mut App) -> Outcome {
     match key.code {
-        KeyCode::Enter => {
-            app.open_session();
-            Outcome::Continue
-        }
+        KeyCode::Enter => Outcome::Continue,
         KeyCode::Up => {
-            app.session_move_up();
+            app.ws_move_up();
             Outcome::Continue
         }
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.session_move_up();
+            app.ws_move_up();
             Outcome::Continue
         }
         KeyCode::Down => {
-            app.session_move_down();
+            app.ws_move_down();
             Outcome::Continue
         }
         KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.session_move_down();
+            app.ws_move_down();
             Outcome::Continue
         }
         _ => Outcome::Continue,
@@ -107,7 +104,7 @@ fn handle_sessions_key(key: KeyEvent, app: &mut App) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sessions::SessionRow;
+    use crate::workspaces::WorkspaceRow;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -158,28 +155,24 @@ mod tests {
         app
     }
 
-    fn app_with_sessions() -> App {
+    fn app_with_workspaces() -> App {
         let mut app = App::new();
-        app.tab = Tab::Sessions;
-        app.sessions = vec![
-            SessionRow {
-                id: "sid-new".into(),
-                project: "proj".into(),
-                started_at: 2000,
-                ended_at: 3000,
-                command_count: 1,
-                tags: vec![],
+        app.tab = Tab::Workspaces;
+        app.workspaces = vec![
+            WorkspaceRow {
+                name: "ws-new".into(),
+                command_count: 3,
+                first_ts: 1000,
+                last_ts: 3000,
             },
-            SessionRow {
-                id: "sid-old".into(),
-                project: "proj".into(),
-                started_at: 1000,
-                ended_at: 2000,
+            WorkspaceRow {
+                name: "ws-old".into(),
                 command_count: 1,
-                tags: vec![],
+                first_ts: 500,
+                last_ts: 1000,
             },
         ];
-        app.session_selected = 0;
+        app.ws_selected = 0;
         app
     }
 
@@ -328,40 +321,36 @@ mod tests {
     #[test]
     fn left_switches_to_history_tab() {
         let mut app = App::new();
-        app.tab = Tab::Sessions;
+        app.tab = Tab::Workspaces;
         handle_key(key(KeyCode::Left), &mut app);
         assert_eq!(app.tab, Tab::History);
     }
 
     #[test]
-    fn right_switches_to_sessions_tab() {
+    fn right_switches_to_workspaces_tab() {
         let mut app = App::new();
-        app.sessions = vec![SessionRow {
-            id: "s1".into(),
-            project: "p".into(),
-            started_at: 1000,
-            ended_at: 2000,
-            command_count: 0,
-            tags: vec![],
+        app.workspaces = vec![WorkspaceRow {
+            name: "ws1".into(),
+            command_count: 1,
+            first_ts: 1000,
+            last_ts: 2000,
         }];
         handle_key(key(KeyCode::Right), &mut app);
-        assert_eq!(app.tab, Tab::Sessions);
+        assert_eq!(app.tab, Tab::Workspaces);
     }
 
     #[test]
-    fn right_on_sessions_stays_sessions() {
+    fn right_on_workspaces_stays_workspaces() {
         let mut app = App::new();
-        app.tab = Tab::Sessions;
-        app.sessions = vec![SessionRow {
-            id: "s1".into(),
-            project: "p".into(),
-            started_at: 1000,
-            ended_at: 2000,
-            command_count: 0,
-            tags: vec![],
+        app.tab = Tab::Workspaces;
+        app.workspaces = vec![WorkspaceRow {
+            name: "ws1".into(),
+            command_count: 1,
+            first_ts: 1000,
+            last_ts: 2000,
         }];
         handle_key(key(KeyCode::Right), &mut app);
-        assert_eq!(app.tab, Tab::Sessions);
+        assert_eq!(app.tab, Tab::Workspaces);
     }
 
     #[test]
@@ -373,60 +362,62 @@ mod tests {
     }
 
     #[test]
-    fn sessions_up_changes_session_selected_not_history_selected() {
-        let mut app = app_with_sessions();
-        app.session_selected = 1;
+    fn ws_up_changes_ws_selected_not_history_selected() {
+        let mut app = app_with_workspaces();
+        app.ws_selected = 1;
         let history_selected_before = app.selected;
         handle_key(key(KeyCode::Up), &mut app);
         assert_eq!(
             app.selected, history_selected_before,
             "history selected must not change"
         );
-        assert_eq!(app.session_selected, 0);
+        assert_eq!(app.ws_selected, 0);
     }
 
     #[test]
-    fn sessions_down_increases_session_selected() {
-        let mut app = app_with_sessions();
-        app.session_selected = 0;
+    fn ws_down_increases_ws_selected() {
+        let mut app = app_with_workspaces();
+        app.ws_selected = 0;
         handle_key(key(KeyCode::Down), &mut app);
-        assert_eq!(app.session_selected, 1);
+        assert_eq!(app.ws_selected, 1);
     }
 
     #[test]
-    fn sessions_enter_is_continue_not_exit() {
-        let mut app = app_with_sessions();
+    fn ws_enter_is_continue_not_exit() {
+        let mut app = app_with_workspaces();
         let outcome = handle_key(key(KeyCode::Enter), &mut app);
         assert!(
             matches!(outcome, Outcome::Continue),
-            "Sessions Enter must be Continue"
+            "Workspaces Enter must be Continue (no-op in PR2)"
         );
     }
 
     #[test]
-    fn sessions_enter_sets_history_reload_and_switches_tab() {
-        let mut app = app_with_sessions();
+    fn ws_enter_does_not_change_tab_or_filters() {
+        let mut app = app_with_workspaces();
         handle_key(key(KeyCode::Enter), &mut app);
-        assert!(app.needs_history_reload);
-        assert_eq!(app.tab, Tab::History);
-        assert_eq!(app.filters.session, Some("sid-new".into()));
+        assert_eq!(app.tab, Tab::Workspaces, "Enter must not change tab");
+        assert!(
+            app.filters.session.is_none(),
+            "Enter must not set session filter"
+        );
     }
 
     #[test]
-    fn sessions_char_does_not_modify_query() {
-        let mut app = app_with_sessions();
+    fn ws_char_does_not_modify_query() {
+        let mut app = app_with_workspaces();
         handle_key(key(KeyCode::Char('g')), &mut app);
-        assert_eq!(app.query, "", "typing in Sessions must not modify query");
+        assert_eq!(app.query, "", "typing in Workspaces must not modify query");
     }
 
     #[test]
-    fn sessions_backspace_does_not_modify_query() {
-        let mut app = app_with_sessions();
+    fn ws_backspace_does_not_modify_query() {
+        let mut app = app_with_workspaces();
         app.query = "existing".into();
         handle_key(key(KeyCode::Backspace), &mut app);
         assert_eq!(
             app.query, "existing",
-            "backspace in Sessions must not modify query"
+            "backspace in Workspaces must not modify query"
         );
     }
 

@@ -90,14 +90,14 @@ pub fn run(
                 match handle_key(key, &mut app) {
                     Outcome::Exit => break,
                     Outcome::Continue => {
-                        if app.needs_session_reload {
-                            app.reload_sessions(conn, now).map_err(|e| {
-                                ThothError::Tui(format!("session reload failed: {e}"))
+                        if app.needs_ws_reload {
+                            app.reload_workspaces(conn).map_err(|e| {
+                                ThothError::Tui(format!("workspace reload failed: {e}"))
                             })?;
                         }
-                        if app.needs_session_commands_reload {
-                            app.reload_session_commands(conn, now).map_err(|e| {
-                                ThothError::Tui(format!("session commands reload failed: {e}"))
+                        if app.needs_ws_commands_reload {
+                            app.reload_ws_commands(conn).map_err(|e| {
+                                ThothError::Tui(format!("workspace commands reload failed: {e}"))
                             })?;
                         }
                         if app.needs_history_reload {
