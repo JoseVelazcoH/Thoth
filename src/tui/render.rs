@@ -606,6 +606,7 @@ mod tests {
 
     fn make_row(cmd: &str, ts: i64, exit: i64, project: &str) -> CommandRow {
         CommandRow {
+            id: 0,
             command: cmd.to_string(),
             timestamp: ts,
             exit_code: exit,

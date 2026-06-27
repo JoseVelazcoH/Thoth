@@ -157,6 +157,7 @@ mod tests {
         let mut app = App::new();
         app.all_rows = vec![
             crate::search::CommandRow {
+                id: 1,
                 timestamp: 2000,
                 project: String::from("p"),
                 tags: String::from("[]"),
@@ -168,6 +169,7 @@ mod tests {
                 workspace: None,
             },
             crate::search::CommandRow {
+                id: 2,
                 timestamp: 1000,
                 project: String::from("p"),
                 tags: String::from("[]"),
@@ -469,6 +471,7 @@ mod tests {
     fn app_with_workspaces_and_commands() -> App {
         let mut app = app_with_workspaces();
         app.ws_commands = vec![crate::search::CommandRow {
+            id: 10,
             command: "git status".into(),
             directory: "/tmp".into(),
             project: "p".into(),

@@ -33,6 +33,7 @@ mod tests {
 
     fn row(command: &str) -> CommandRow {
         CommandRow {
+            id: 0,
             timestamp: 0,
             project: String::new(),
             tags: String::from("[]"),

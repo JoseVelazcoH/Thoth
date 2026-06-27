@@ -552,6 +552,7 @@ mod tests {
         app.ws_selected = 0;
         app.ws_commands = (0..cmd_count)
             .map(|i| crate::search::CommandRow {
+                id: (i + 1) as i64,
                 command: format!("cmd-{i}"),
                 directory: "/tmp".into(),
                 project: "p".into(),

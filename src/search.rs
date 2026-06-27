@@ -114,6 +114,7 @@ pub enum ExitFilter {
 }
 
 pub struct CommandRow {
+    pub id: i64,
     pub timestamp: i64,
     pub project: String,
     pub tags: String,
@@ -215,7 +216,7 @@ pub fn build_query(
     args: &SearchArgs,
     now: i64,
 ) -> Result<(String, Vec<Box<dyn ToSql>>), ThothError> {
-    let cols = "c.timestamp, c.project, c.tags, c.exit_code, c.duration_ms, c.directory, c.command, c.session_id, c.workspace";
+    let cols = "c.id, c.timestamp, c.project, c.tags, c.exit_code, c.duration_ms, c.directory, c.command, c.session_id, c.workspace";
 
     let tokens: Vec<String> = match &args.query {
         Some(q) => q
@@ -320,15 +321,16 @@ pub fn execute(
         rusqlite::params_from_iter(params.iter().map(|p| p.as_ref())),
         |row| {
             Ok(CommandRow {
-                timestamp: row.get(0)?,
-                project: row.get(1)?,
-                tags: row.get(2)?,
-                exit_code: row.get(3)?,
-                duration_ms: row.get(4)?,
-                directory: row.get(5)?,
-                command: row.get(6)?,
-                session_id: row.get(7)?,
-                workspace: row.get(8)?,
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                project: row.get(2)?,
+                tags: row.get(3)?,
+                exit_code: row.get(4)?,
+                duration_ms: row.get(5)?,
+                directory: row.get(6)?,
+                command: row.get(7)?,
+                session_id: row.get(8)?,
+                workspace: row.get(9)?,
             })
         },
     )?;
@@ -907,6 +909,7 @@ mod tests {
     fn fixture_rows() -> Vec<CommandRow> {
         vec![
             CommandRow {
+                id: 1,
                 timestamp: 1_700_000_000,
                 project: "alpha".into(),
                 tags: r#"["rust"]"#.into(),
@@ -918,6 +921,7 @@ mod tests {
                 workspace: None,
             },
             CommandRow {
+                id: 2,
                 timestamp: 1_700_001_000,
                 project: "beta".into(),
                 tags: "[]".into(),
@@ -952,6 +956,7 @@ mod tests {
     fn render_show_session_reduced_columns_two_sessions() {
         let rows = vec![
             CommandRow {
+                id: 1,
                 timestamp: 1_700_000_000,
                 project: "alpha".into(),
                 tags: r#"["rust"]"#.into(),
@@ -963,6 +968,7 @@ mod tests {
                 workspace: None,
             },
             CommandRow {
+                id: 2,
                 timestamp: 1_700_001_000,
                 project: "alpha".into(),
                 tags: "[]".into(),
@@ -974,6 +980,7 @@ mod tests {
                 workspace: None,
             },
             CommandRow {
+                id: 3,
                 timestamp: 1_700_002_000,
                 project: "beta".into(),
                 tags: "[]".into(),
