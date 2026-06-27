@@ -16,6 +16,7 @@ use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
 use rusqlite::Connection;
 
 use crate::error::ThothError;
+use crate::search::Column;
 use crate::tui::app::App;
 use crate::tui::event::{handle_key, Outcome};
 use crate::tui::render::format_action_line;
@@ -44,7 +45,12 @@ impl Drop for TerminalGuard {
     }
 }
 
-pub fn run(conn: &Connection, now: i64, is_bottom: bool) -> Result<(), ThothError> {
+pub fn run(
+    conn: &Connection,
+    now: i64,
+    is_bottom: bool,
+    columns: Vec<Column>,
+) -> Result<(), ThothError> {
     let tty = OpenOptions::new()
         .read(true)
         .write(true)
@@ -72,7 +78,7 @@ pub fn run(conn: &Connection, now: i64, is_bottom: bool) -> Result<(), ThothErro
 
     loop {
         terminal
-            .draw(|f| render::draw(f, &app, now, is_bottom, &mut table_state))
+            .draw(|f| render::draw(f, &app, now, is_bottom, &columns, &mut table_state))
             .map_err(|e| ThothError::Tui(format!("draw failed: {e}")))?;
 
         if ct_event::poll(std::time::Duration::from_millis(200))
