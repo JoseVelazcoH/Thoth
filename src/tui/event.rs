@@ -4,6 +4,10 @@ use crate::tui::app::{Action, App, Confirm, Mode, Tab, WsPane};
 
 fn handle_confirm_key(key: crossterm::event::KeyEvent, app: &mut App) -> Outcome {
     use crossterm::event::KeyCode;
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        app.action = None;
+        return Outcome::Exit;
+    }
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => match app.confirm.take() {
             Some(Confirm::Replay(r)) => {
@@ -632,6 +636,19 @@ mod tests {
         let outcome = handle_key(key(KeyCode::Esc), &mut app);
         assert!(matches!(outcome, Outcome::Continue));
         assert!(app.confirm.is_none());
+    }
+
+    #[test]
+    fn ctrl_c_exits_even_with_confirm_open() {
+        let mut app = app_with_workspaces_and_commands();
+        handle_key(key(KeyCode::Enter), &mut app);
+        assert!(app.confirm.is_some());
+        let outcome = handle_key(ctrl(KeyCode::Char('c')), &mut app);
+        assert!(
+            matches!(outcome, Outcome::Exit),
+            "Ctrl-C must exit from any state"
+        );
+        assert!(app.action.is_none());
     }
 
     #[test]
