@@ -7,8 +7,13 @@ use ratatui::{
 };
 
 use crate::search::{Column, CommandRow};
-use crate::tui::app::App;
+use crate::sessions::SessionRow;
+use crate::tui::app::{App, Tab};
 use crate::tui::time::format_relative;
+
+const ACCENT: Color = Color::Cyan;
+const DIM_COLOR: Color = Color::DarkGray;
+const BORDER_COLOR: Color = Color::DarkGray;
 
 pub fn display_command(raw: &str) -> String {
     let collapsed: String = raw
@@ -66,6 +71,11 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+fn short_id(id: &str) -> &str {
+    let end = id.char_indices().nth(8).map(|(i, _)| i).unwrap_or(id.len());
+    &id[..end]
+}
+
 fn filter_chips(app: &App) -> String {
     let mut parts = Vec::new();
     if let Some(ref p) = app.filters.project {
@@ -82,6 +92,9 @@ fn filter_chips(app: &App) -> String {
     }
     if let Some(ref u) = app.filters.until {
         parts.push(format!("[until:{u}]"));
+    }
+    if let Some(ref s) = app.filters.session {
+        parts.push(format!("[session:{}]", short_id(s)));
     }
     parts.join(" ")
 }
@@ -151,91 +164,44 @@ pub fn resolve_tui_columns(names: &[String]) -> Vec<Column> {
     resolved.into_iter().flatten().collect()
 }
 
-const ACCENT: Color = Color::Cyan;
-const DIM_COLOR: Color = Color::DarkGray;
-const BORDER_COLOR: Color = Color::DarkGray;
+fn render_tab_bar(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
+    let accent_style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+    let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
+    let active_style = accent_style.add_modifier(Modifier::REVERSED);
 
-pub fn draw(
+    let (history_style, sessions_style) = match app.tab {
+        Tab::History => (active_style, dim_style),
+        Tab::Sessions => (dim_style, active_style),
+    };
+
+    let line = Line::from(vec![
+        Span::styled(" History ", history_style),
+        Span::styled("  ", dim_style),
+        Span::styled(" Sessions ", sessions_style),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn render_history_pane(
     frame: &mut Frame,
+    area: ratatui::layout::Rect,
     app: &App,
     now: i64,
     is_bottom: bool,
     columns: &[Column],
     table_state: &mut TableState,
 ) {
-    let area = frame.area();
-
-    let chunks = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
-
-    let header_area = chunks[0];
-    let list_area = chunks[1];
-    let query_area = chunks[2];
-    let status_area = chunks[3];
-    let controls_area = chunks[4];
-
-    let version = env!("CARGO_PKG_VERSION");
-    let accent_style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
     let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
-
-    let accent_bar = Span::styled("▌ ", accent_style);
-    let name_span = Span::styled("Thoth", accent_style);
-    let sep_span = Span::styled(" · ", dim_style);
-    let version_span = Span::styled(format!("v{version}"), dim_style);
-    let count_sep = Span::styled("  ", dim_style);
-    let count_span = Span::styled(format!("{} commands", app.all_rows.len()), dim_style);
-    let history_right = format!("History count: {}", app.all_rows.len());
-    let right_len = history_right.len();
-    let left_len =
-        2 + 5 + 3 + 1 + version.len() + 2 + format!("{} commands", app.all_rows.len()).len();
-    let pad = (header_area.width as usize).saturating_sub(left_len + right_len);
-    let padding_span = Span::raw(format!("{:pad$}", "", pad = pad));
-    let history_span = Span::styled(history_right, dim_style);
-
-    let header_line = Line::from(vec![
-        accent_bar,
-        name_span,
-        sep_span,
-        version_span,
-        count_sep,
-        count_span,
-        padding_span,
-        history_span,
-    ]);
-    let header = Paragraph::new(header_line);
-    frame.render_widget(header, header_area);
-
-    let controls_line = Line::from(vec![
-        Span::styled(" ↑↓", accent_style),
-        Span::styled(" navigate", dim_style),
-        Span::styled(" · ", dim_style),
-        Span::styled("↵", accent_style),
-        Span::styled(" run", dim_style),
-        Span::styled(" · ", dim_style),
-        Span::styled("⇥", accent_style),
-        Span::styled(" edit", dim_style),
-        Span::styled(" · ", dim_style),
-        Span::styled("esc", accent_style),
-        Span::styled(" quit", dim_style),
-    ]);
-    let controls = Paragraph::new(controls_line);
-    frame.render_widget(controls, controls_area);
-
     let border_style = Style::default().fg(BORDER_COLOR);
+
     let list_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style)
         .title(Span::styled(" history ", dim_style));
 
-    let inner_list_area = list_block.inner(list_area);
-    frame.render_widget(list_block, list_area);
+    let inner_list_area = list_block.inner(area);
+    frame.render_widget(list_block, area);
 
     let has_command_col = columns.iter().any(|c| matches!(c, Column::Command));
     let n_cols = columns.len();
@@ -338,10 +304,193 @@ pub fn draw(
         table_state.select(Some(display_idx));
     }
     frame.render_stateful_widget(table, inner_list_area, table_state);
+}
+
+fn render_sessions_pane(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    app: &App,
+    now: i64,
+    table_state: &mut TableState,
+) {
+    let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
+    let border_style = Style::default().fg(BORDER_COLOR);
+    let highlight_style = Style::default()
+        .add_modifier(Modifier::REVERSED)
+        .add_modifier(Modifier::BOLD);
+
+    let h_chunks = Layout::horizontal([Constraint::Percentage(38), Constraint::Min(1)]).split(area);
+
+    let left_area = h_chunks[0];
+    let right_area = h_chunks[1];
+
+    let sessions_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title(Span::styled(" sessions ", dim_style));
+
+    let inner_left = sessions_block.inner(left_area);
+    frame.render_widget(sessions_block, left_area);
+
+    if app.sessions.is_empty() {
+        let empty = Paragraph::new("no sessions").style(dim_style);
+        frame.render_widget(empty, inner_left);
+    } else {
+        let rows: Vec<Row> = app.sessions.iter().map(|s| session_row(s, now)).collect();
+
+        let widths = vec![
+            Constraint::Length(9),
+            Constraint::Length(16),
+            Constraint::Min(1),
+        ];
+
+        let table = Table::new(rows, widths)
+            .block(Block::default())
+            .row_highlight_style(highlight_style);
+
+        if app.sessions.is_empty() {
+            table_state.select(None);
+        } else {
+            table_state.select(Some(app.session_selected));
+        }
+        frame.render_stateful_widget(table, inner_left, table_state);
+    }
+
+    let commands_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title(Span::styled(" commands ", dim_style));
+
+    let inner_right = commands_block.inner(right_area);
+    frame.render_widget(commands_block, right_area);
+
+    if app.session_commands.is_empty() {
+        let empty = Paragraph::new("no commands").style(dim_style);
+        frame.render_widget(empty, inner_right);
+    } else {
+        let rows: Vec<Row> = app
+            .session_commands
+            .iter()
+            .map(|cmd| {
+                let time_text = truncate(&format_relative(cmd.timestamp, now), 9);
+                let exit_text_val = exit_text(cmd.exit_code);
+                let cmd_text = truncate(
+                    &display_command(&cmd.command),
+                    inner_right.width.saturating_sub(16) as usize,
+                );
+                Row::new(vec![
+                    Cell::from(Span::styled(time_text, Style::default().fg(DIM_COLOR))),
+                    Cell::from(Span::styled(
+                        exit_text_val.0,
+                        Style::default().fg(exit_text_val.1),
+                    )),
+                    Cell::from(cmd_text),
+                ])
+            })
+            .collect();
+
+        let widths = vec![
+            Constraint::Length(9),
+            Constraint::Length(4),
+            Constraint::Min(1),
+        ];
+
+        let table = Table::new(rows, widths).block(Block::default());
+        frame.render_widget(table, inner_right);
+    }
+}
+
+fn session_row(s: &SessionRow, now: i64) -> Row<'static> {
+    let time_text = truncate(&format_relative(s.started_at, now), 9);
+    let project_text = truncate(&s.project, 16);
+    let count_text = s.command_count.to_string();
+    Row::new(vec![
+        Cell::from(Span::styled(time_text, Style::default().fg(DIM_COLOR))),
+        Cell::from(Span::styled(project_text, Style::default().fg(Color::Blue))),
+        Cell::from(count_text),
+    ])
+}
+
+pub fn draw(
+    frame: &mut Frame,
+    app: &App,
+    now: i64,
+    is_bottom: bool,
+    columns: &[Column],
+    table_state: &mut TableState,
+) {
+    let area = frame.area();
+
+    let chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(area);
+
+    let tabbar_area = chunks[0];
+    let header_area = chunks[1];
+    let middle_area = chunks[2];
+    let query_area = chunks[3];
+    let status_area = chunks[4];
+    let controls_area = chunks[5];
+
+    render_tab_bar(frame, tabbar_area, app);
+
+    let version = env!("CARGO_PKG_VERSION");
+    let accent_style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+    let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
+
+    let accent_bar = Span::styled("▌ ", accent_style);
+    let name_span = Span::styled("Thoth", accent_style);
+    let sep_span = Span::styled(" · ", dim_style);
+    let version_span = Span::styled(format!("v{version}"), dim_style);
+    let count_sep = Span::styled("  ", dim_style);
+    let count_span = Span::styled(format!("{} commands", app.all_rows.len()), dim_style);
+    let history_right = format!("History count: {}", app.all_rows.len());
+    let right_len = history_right.len();
+    let left_len =
+        2 + 5 + 3 + 1 + version.len() + 2 + format!("{} commands", app.all_rows.len()).len();
+    let pad = (header_area.width as usize).saturating_sub(left_len + right_len);
+    let padding_span = Span::raw(format!("{:pad$}", "", pad = pad));
+    let history_span = Span::styled(history_right, dim_style);
+
+    let header_line = Line::from(vec![
+        accent_bar,
+        name_span,
+        sep_span,
+        version_span,
+        count_sep,
+        count_span,
+        padding_span,
+        history_span,
+    ]);
+    frame.render_widget(Paragraph::new(header_line), header_area);
+
+    match app.tab {
+        Tab::History => {
+            render_history_pane(
+                frame,
+                middle_area,
+                app,
+                now,
+                is_bottom,
+                columns,
+                table_state,
+            );
+        }
+        Tab::Sessions => {
+            render_sessions_pane(frame, middle_area, app, now, table_state);
+        }
+    }
 
     let query_text = format!("> {}", app.query);
-    let query_widget = Paragraph::new(query_text);
-    frame.render_widget(query_widget, query_area);
+    frame.render_widget(Paragraph::new(query_text), query_area);
 
     let chips = filter_chips(app);
     let result_count = app.filtered.len();
@@ -350,8 +499,43 @@ pub fn draw(
     } else {
         format!("{chips}  {result_count} results")
     };
-    let status_widget = Paragraph::new(status_text).alignment(Alignment::Left);
-    frame.render_widget(status_widget, status_area);
+    frame.render_widget(
+        Paragraph::new(status_text).alignment(Alignment::Left),
+        status_area,
+    );
+
+    let controls_line = match app.tab {
+        Tab::History => Line::from(vec![
+            Span::styled(" ←→", accent_style),
+            Span::styled(" tabs", dim_style),
+            Span::styled(" · ", dim_style),
+            Span::styled("↑↓", accent_style),
+            Span::styled(" navigate", dim_style),
+            Span::styled(" · ", dim_style),
+            Span::styled("↵", accent_style),
+            Span::styled(" run", dim_style),
+            Span::styled(" · ", dim_style),
+            Span::styled("⇥", accent_style),
+            Span::styled(" edit", dim_style),
+            Span::styled(" · ", dim_style),
+            Span::styled("esc", accent_style),
+            Span::styled(" quit", dim_style),
+        ]),
+        Tab::Sessions => Line::from(vec![
+            Span::styled(" ←→", accent_style),
+            Span::styled(" tabs", dim_style),
+            Span::styled(" · ", dim_style),
+            Span::styled("↑↓", accent_style),
+            Span::styled(" session", dim_style),
+            Span::styled(" · ", dim_style),
+            Span::styled("↵", accent_style),
+            Span::styled(" open", dim_style),
+            Span::styled(" · ", dim_style),
+            Span::styled("esc", accent_style),
+            Span::styled(" quit", dim_style),
+        ]),
+    };
+    frame.render_widget(Paragraph::new(controls_line), controls_area);
 }
 
 pub fn format_action_line(action: Option<&crate::tui::app::Action>) -> Option<String> {
@@ -367,7 +551,8 @@ pub fn format_action_line(action: Option<&crate::tui::app::Action>) -> Option<St
 mod tests {
     use super::*;
     use crate::config::default_tui_columns;
-    use crate::tui::app::{Action, App};
+    use crate::sessions::SessionRow;
+    use crate::tui::app::{Action, App, Tab};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -385,6 +570,17 @@ mod tests {
             tags: "[]".to_string(),
             session_id: "s1".to_string(),
             duration_ms: 100,
+        }
+    }
+
+    fn make_session(id: &str, project: &str, started_at: i64, count: i64) -> SessionRow {
+        SessionRow {
+            id: id.to_string(),
+            project: project.to_string(),
+            started_at,
+            ended_at: started_at + 3600,
+            command_count: count,
+            tags: vec![],
         }
     }
 
@@ -412,6 +608,17 @@ mod tests {
         lines.join("\n")
     }
 
+    fn render_app_buf(app: &App) -> ratatui::buffer::Buffer {
+        let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ts = TableState::default();
+        let cols = default_cols();
+        terminal
+            .draw(|f| draw(f, app, TEST_NOW, true, &cols, &mut ts))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
     fn app_with_rows() -> App {
         let mut app = App::new();
         app.all_rows = vec![
@@ -421,6 +628,206 @@ mod tests {
         ];
         app.recompute();
         app
+    }
+
+    fn app_with_sessions() -> App {
+        let mut app = App::new();
+        app.tab = Tab::Sessions;
+        app.sessions = vec![
+            make_session("session-abc-123", "proj-alpha", TEST_NOW - 3600, 5),
+            make_session("session-def-456", "proj-beta", TEST_NOW - 7200, 3),
+        ];
+        app.session_selected = 0;
+        app.session_commands = vec![
+            make_row("git status", TEST_NOW - 3500, 0, "proj-alpha"),
+            make_row("cargo build", TEST_NOW - 3400, 0, "proj-alpha"),
+        ];
+        app
+    }
+
+    #[test]
+    fn tab_bar_shows_both_labels() {
+        let app = app_with_rows();
+        let text = render_app(&app);
+        assert!(text.contains("History"), "tab bar must show 'History'");
+        assert!(text.contains("Sessions"), "tab bar must show 'Sessions'");
+    }
+
+    #[test]
+    fn tab_bar_active_history_is_reversed() {
+        let app = app_with_rows();
+        let buf = render_app_buf(&app);
+
+        let any_reversed_row0 = (0..TEST_WIDTH).any(|x| {
+            buf[(x, 0)]
+                .style()
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        });
+        assert!(
+            any_reversed_row0,
+            "tab bar row 0 must have REVERSED on active History tab label"
+        );
+
+        let reversed_count_row0 = (0..TEST_WIDTH)
+            .filter(|&x| {
+                buf[(x, 0)]
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::REVERSED)
+            })
+            .count();
+
+        assert!(
+            reversed_count_row0 < TEST_WIDTH as usize,
+            "tab bar must NOT be fully reversed; only active label should be reversed (count={reversed_count_row0})"
+        );
+    }
+
+    #[test]
+    fn header_has_no_full_width_reversed_bar() {
+        let app = app_with_rows();
+        let buf = render_app_buf(&app);
+
+        let reversed_count = (0..TEST_WIDTH)
+            .filter(|&x| {
+                buf[(x, 1)]
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::REVERSED)
+            })
+            .count();
+        assert_eq!(
+            reversed_count, 0,
+            "header row (y=1) must have zero REVERSED cells; found {reversed_count}"
+        );
+    }
+
+    #[test]
+    fn table_header_not_reversed() {
+        let app = app_with_rows();
+        let buf = render_app_buf(&app);
+
+        let header_row_y = 3u16;
+        let reversed_count = (0..TEST_WIDTH)
+            .filter(|&x| {
+                buf[(x, header_row_y)]
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::REVERSED)
+            })
+            .count();
+        assert_eq!(
+            reversed_count, 0,
+            "table header row must have zero REVERSED cells; found {reversed_count}"
+        );
+    }
+
+    #[test]
+    fn sessions_tab_renders_two_panes() {
+        let app = app_with_sessions();
+        let text = render_app(&app);
+        assert!(
+            text.contains("sessions"),
+            "Sessions tab must show 'sessions' pane title"
+        );
+        assert!(
+            text.contains("commands"),
+            "Sessions tab must show 'commands' pane title"
+        );
+    }
+
+    #[test]
+    fn sessions_tab_shows_session_row_highlighted() {
+        let app = app_with_sessions();
+        let buf = render_app_buf(&app);
+
+        let any_reversed = (0..TEST_HEIGHT).any(|row_y| {
+            (0..TEST_WIDTH).any(|x| {
+                buf[(x, row_y)]
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::REVERSED)
+            })
+        });
+        assert!(
+            any_reversed,
+            "Sessions tab must have REVERSED on selected row"
+        );
+    }
+
+    #[test]
+    fn sessions_tab_shows_command_text() {
+        let app = app_with_sessions();
+        let text = render_app(&app);
+        assert!(
+            text.contains("git status"),
+            "Sessions tab right pane must show session command text"
+        );
+    }
+
+    #[test]
+    fn history_tab_still_renders_history_block() {
+        let app = app_with_rows();
+        let text = render_app(&app);
+        assert!(
+            text.contains("history"),
+            "History tab must show 'history' block title"
+        );
+        assert!(
+            text.contains("git status"),
+            "History tab must show commands"
+        );
+    }
+
+    #[test]
+    fn controls_history_shows_navigate_and_run() {
+        let app = app_with_rows();
+        let text = render_app(&app);
+        assert!(
+            text.contains("navigate"),
+            "History controls must contain 'navigate'"
+        );
+        assert!(text.contains("run"), "History controls must contain 'run'");
+        assert!(
+            text.contains("edit"),
+            "History controls must contain 'edit'"
+        );
+        assert!(
+            text.contains("quit"),
+            "History controls must contain 'quit'"
+        );
+        assert!(text.contains("tabs"), "History controls must hint 'tabs'");
+    }
+
+    #[test]
+    fn controls_sessions_shows_session_and_open() {
+        let app = app_with_sessions();
+        let text = render_app(&app);
+        assert!(
+            text.contains("session"),
+            "Sessions controls must contain 'session'"
+        );
+        assert!(
+            text.contains("open"),
+            "Sessions controls must contain 'open'"
+        );
+        assert!(
+            text.contains("quit"),
+            "Sessions controls must contain 'quit'"
+        );
+        assert!(text.contains("tabs"), "Sessions controls must hint 'tabs'");
+    }
+
+    #[test]
+    fn session_chip_shows_when_session_filter_set() {
+        let mut app = app_with_rows();
+        app.filters.session = Some("abcdefgh-1234-5678".into());
+        let text = render_app(&app);
+        assert!(
+            text.contains("[session:abcdefgh]"),
+            "status bar must show session chip with 8-char prefix; got:\n{text}"
+        );
     }
 
     #[test]
@@ -502,14 +909,7 @@ mod tests {
         app.recompute();
         app.selected = 0;
 
-        let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let mut ts = TableState::default();
-        let cols = default_cols();
-        terminal
-            .draw(|f| draw(f, &app, TEST_NOW, true, &cols, &mut ts))
-            .unwrap();
-        let buf = terminal.backend().buffer().clone();
+        let buf = render_app_buf(&app);
 
         let any_reversed = (0..TEST_HEIGHT).any(|row_y| {
             (0..TEST_WIDTH).any(|x| {
@@ -558,7 +958,7 @@ mod tests {
             text.contains("ok"),
             "exit 0 must render as 'ok'; got:\n{text}"
         );
-        assert!(!text.contains('✓'), "exit 0 must NOT render as glyph ✓");
+        assert!(!text.contains('✓'), "exit 0 must NOT render as glyph");
     }
 
     #[test]
@@ -571,58 +971,7 @@ mod tests {
             text.contains("fail"),
             "exit nonzero must render as 'fail'; got:\n{text}"
         );
-        assert!(
-            !text.contains('✗'),
-            "exit nonzero must NOT render as glyph ✗"
-        );
-    }
-
-    #[test]
-    fn controls_hint_is_visible() {
-        let app = app_with_rows();
-        let text = render_app(&app);
-        assert!(
-            text.contains("navigate"),
-            "controls hint must contain 'navigate'; got:\n{text}"
-        );
-        assert!(
-            text.contains("run"),
-            "controls hint must contain 'run'; got:\n{text}"
-        );
-        assert!(
-            text.contains("edit"),
-            "controls hint must contain 'edit'; got:\n{text}"
-        );
-        assert!(
-            text.contains("quit"),
-            "controls hint must contain 'quit'; got:\n{text}"
-        );
-    }
-
-    #[test]
-    fn header_has_no_full_width_reversed_bar() {
-        let app = app_with_rows();
-        let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let mut ts = TableState::default();
-        let cols = default_cols();
-        terminal
-            .draw(|f| draw(f, &app, TEST_NOW, true, &cols, &mut ts))
-            .unwrap();
-        let buf = terminal.backend().buffer().clone();
-
-        let reversed_count = (0..TEST_WIDTH)
-            .filter(|&x| {
-                buf[(x, 0)]
-                    .style()
-                    .add_modifier
-                    .contains(Modifier::REVERSED)
-            })
-            .count();
-        assert_eq!(
-            reversed_count, 0,
-            "header row must have zero REVERSED cells; found {reversed_count}"
-        );
+        assert!(!text.contains('✗'), "exit nonzero must NOT render as glyph");
     }
 
     #[test]
@@ -653,7 +1002,7 @@ mod tests {
 
     #[test]
     fn scroll_brings_selected_row_into_view() {
-        const SMALL_HEIGHT: u16 = 8;
+        const SMALL_HEIGHT: u16 = 10;
         const SMALL_WIDTH: u16 = 80;
         let mut app = App::new();
         app.all_rows = (0..20)
@@ -763,7 +1112,7 @@ mod tests {
         ];
         app.recompute();
 
-        let (default_buf, _) = render_app_small(&app, 80, 8);
+        let (default_buf, _) = render_app_small(&app, 80, 12);
         println!("=== DEFAULT (newest at bottom, cursor on newest) ===");
         println!("{default_buf}");
 
@@ -777,7 +1126,7 @@ mod tests {
             handle_key(up_key, &mut app);
         }
 
-        let (after_up3, _) = render_app_small(&app, 80, 8);
+        let (after_up3, _) = render_app_small(&app, 80, 12);
         println!("\n=== AFTER Up x3 (cursor on cmd-older) ===");
         println!("{after_up3}");
 
@@ -988,7 +1337,7 @@ mod tests {
         use crate::tui::event::handle_key;
         use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
-        const H: u16 = 8;
+        const H: u16 = 10;
         const W: u16 = 80;
         let mut app = App::new();
         app.all_rows = (0..20)
@@ -1249,33 +1598,6 @@ mod tests {
     }
 
     #[test]
-    fn table_header_not_reversed() {
-        let app = app_with_rows();
-        let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let mut ts = TableState::default();
-        let cols = default_cols();
-        terminal
-            .draw(|f| draw(f, &app, TEST_NOW, true, &cols, &mut ts))
-            .unwrap();
-        let buf = terminal.backend().buffer().clone();
-
-        let header_row_y = 2u16;
-        let reversed_count = (0..TEST_WIDTH)
-            .filter(|&x| {
-                buf[(x, header_row_y)]
-                    .style()
-                    .add_modifier
-                    .contains(Modifier::REVERSED)
-            })
-            .count();
-        assert_eq!(
-            reversed_count, 0,
-            "table header row must have zero REVERSED cells; found {reversed_count}"
-        );
-    }
-
-    #[test]
     fn reduced_columns_only_show_selected_headers() {
         let mut app = App::new();
         app.all_rows = vec![make_row("my-cmd", TEST_NOW - 10, 1, "proj")];
@@ -1396,5 +1718,48 @@ mod tests {
             .iter()
             .any(|l| l.contains("exit") && l.contains("command")));
         assert!(lines2.iter().all(|l| !l.contains("time")));
+    }
+
+    #[test]
+    fn dump_sessions_tab_buffer() {
+        const NOW: i64 = 1_000_000_000;
+        const W: u16 = 100;
+        const H: u16 = 16;
+
+        let mut app = App::new();
+        app.tab = Tab::Sessions;
+        app.sessions = vec![
+            make_session("abc123def456", "proj-alpha", NOW - 3600, 5),
+            make_session("xyz789uvw012", "proj-beta", NOW - 7200, 3),
+        ];
+        app.session_selected = 0;
+        app.session_commands = vec![
+            make_row("git status", NOW - 3500, 0, "proj-alpha"),
+            make_row("cargo build --release", NOW - 3400, 0, "proj-alpha"),
+            make_row("cargo test", NOW - 3200, 1, "proj-alpha"),
+        ];
+
+        let cols = default_cols();
+        let backend = TestBackend::new(W, H);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ts = TableState::default();
+        terminal
+            .draw(|f| draw(f, &app, NOW, true, &cols, &mut ts))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut lines: Vec<String> = Vec::new();
+        for row in 0..H {
+            let mut line = String::new();
+            for col in 0..W {
+                line.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+            }
+            lines.push(line.trim_end().to_string());
+        }
+        let text = lines.join("\n");
+        println!("=== SESSIONS TAB (100x16) ===");
+        println!("{text}");
+
+        assert!(text.contains("sessions"), "must show sessions pane");
+        assert!(text.contains("commands"), "must show commands pane");
     }
 }
