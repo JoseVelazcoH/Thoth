@@ -351,7 +351,8 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                     println!("(no tags recorded)");
                 } else {
                     for (tag, count) in tags {
-                        println!("{tag} ({count} commands)");
+                        let noun = if count == 1 { "command" } else { "commands" };
+                        println!("{tag} ({count} {noun})");
                     }
                 }
             } else {
