@@ -25,7 +25,8 @@ _tth_precmd() {
         --duration "$_dur" \
         --timestamp "$EPOCHSECONDS" \
         --tags "${TTH_ACTIVE_TAGS:-[]}" \
-        --terminal-id "$TTH_SESSION_ID" &!
+        --terminal-id "$TTH_SESSION_ID" \
+        --workspace "${TTH_ACTIVE_WORKSPACE:-}" &!
     _TTH_CMD=""
 }
 
@@ -42,6 +43,14 @@ tth-untag() {
     else
         eval "$(command tth untag "$1")"
     fi
+}
+
+tth-sw() {
+    eval "$(command tth workspace start "$1")"
+}
+
+tth-ew() {
+    eval "$(command tth workspace end)"
 }
 
 _tth_widget() {
