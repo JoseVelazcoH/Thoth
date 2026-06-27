@@ -438,6 +438,82 @@ fn record_never_fail_contract_preserved() {
         .code(0);
 }
 
+#[test]
+fn help_top_level_contains_about_and_command_descriptions() {
+    let output = tth().args(["--help"]).output().unwrap();
+    assert!(output.status.success(), "tth --help must exit 0");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("Thoth records every command"),
+        "top-level about not found; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Search history"),
+        "search description not found; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("List work sessions"),
+        "sessions description not found; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Run diagnostics"),
+        "doctor description not found; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Show history insights"),
+        "stats description not found; got:\n{stdout}"
+    );
+}
+
+#[test]
+fn help_search_shows_about_and_flags() {
+    let output = tth().args(["help", "search"]).output().unwrap();
+    assert!(output.status.success(), "tth help search must exit 0");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("Search history"),
+        "search about not found; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("--project"),
+        "--project flag not documented; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("--limit"),
+        "--limit flag not documented; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("--since"),
+        "--since flag not documented; got:\n{stdout}"
+    );
+}
+
+#[test]
+fn help_forget_shows_about_and_flags() {
+    let output = tth().args(["help", "forget"]).output().unwrap();
+    assert!(output.status.success(), "tth help forget must exit 0");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("Delete recent commands"),
+        "forget about not found; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("--dry-run"),
+        "--dry-run flag not documented; got:\n{stdout}"
+    );
+}
+
+#[test]
+fn help_sessions_shows_about() {
+    let output = tth().args(["help", "sessions"]).output().unwrap();
+    assert!(output.status.success(), "tth help sessions must exit 0");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("List work sessions"),
+        "sessions about not found; got:\n{stdout}"
+    );
+}
+
 fn tth_with_env(db_path: &std::path::Path, error_log: &std::path::Path) -> Command {
     let mut cmd = tth();
     cmd.env("THOTH_DB", db_path.to_str().unwrap())
