@@ -2079,4 +2079,135 @@ mod tests {
             "Workspaces Commands controls must contain 'back'; got:\n{text}"
         );
     }
+
+    #[test]
+    fn dump_pr4a_screenshots() {
+        const NOW: i64 = 1_000_000_000;
+        const W: u16 = 100;
+        const H: u16 = 18;
+
+        let make_r = |cmd: &str, ts: i64, exit: i64| CommandRow {
+            id: 0,
+            command: cmd.to_string(),
+            timestamp: ts,
+            exit_code: exit,
+            project: "proj".to_string(),
+            directory: "/home/user/proj".to_string(),
+            tags: "[]".to_string(),
+            session_id: "s1".to_string(),
+            duration_ms: 100,
+            workspace: None,
+        };
+
+        let make_rows = || {
+            vec![
+                make_r("git status", NOW - 60, 0),
+                make_r("cargo build --release", NOW - 300, 0),
+                make_r("cargo test", NOW - 1200, 0),
+                make_r("docker run -p 8080:80 nginx", NOW - 3600, 1),
+            ]
+        };
+
+        let render_text = |app: &App| -> String {
+            let backend = TestBackend::new(W, H);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let mut ts = TableState::default();
+            let mut cts = TableState::default();
+            let cols = default_cols();
+            terminal
+                .draw(|f| draw_with_cmd_state(f, app, NOW, true, &cols, &mut ts, &mut cts))
+                .unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let mut lines: Vec<String> = Vec::new();
+            for row in 0..H {
+                let mut line = String::new();
+                for col in 0..W {
+                    line.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+                }
+                lines.push(line.trim_end().to_string());
+            }
+            lines.join("\n")
+        };
+
+        let mut app_a = App::new();
+        app_a.all_rows = make_rows();
+        app_a.recompute();
+        app_a.enter_normal_mode();
+        app_a.selected = 1;
+        let dump_a = render_text(&app_a);
+        println!("\n=== DUMP (a): History in Normal mode ===\n{dump_a}");
+
+        let mut app_b = App::new();
+        app_b.all_rows = make_rows();
+        app_b.recompute();
+        app_b.selected = 0;
+        app_b.confirm = Some(Confirm::Delete(ConfirmDelete {
+            id: 42,
+            label: "cargo test".into(),
+            origin: DeleteOrigin::History,
+        }));
+        let dump_b = render_text(&app_b);
+        println!("\n=== DUMP (b): Delete confirm modal ===\n{dump_b}");
+
+        let ws_rows = vec![
+            CommandRow {
+                id: 1,
+                command: "git status".into(),
+                timestamp: NOW - 500,
+                exit_code: 0,
+                project: "proj".into(),
+                directory: "/home/user".into(),
+                tags: "[]".into(),
+                session_id: "s1".into(),
+                duration_ms: 50,
+                workspace: Some("my-workspace".into()),
+            },
+            CommandRow {
+                id: 2,
+                command: "cargo build --release".into(),
+                timestamp: NOW - 400,
+                exit_code: 0,
+                project: "proj".into(),
+                directory: "/home/user".into(),
+                tags: "[]".into(),
+                session_id: "s1".into(),
+                duration_ms: 8000,
+                workspace: Some("my-workspace".into()),
+            },
+            CommandRow {
+                id: 3,
+                command: "cargo test -- --nocapture".into(),
+                timestamp: NOW - 300,
+                exit_code: 1,
+                project: "proj".into(),
+                directory: "/home/user".into(),
+                tags: "[]".into(),
+                session_id: "s1".into(),
+                duration_ms: 3000,
+                workspace: Some("my-workspace".into()),
+            },
+        ];
+        use crate::workspaces::WorkspaceRow;
+        let mut app_c = App::new();
+        app_c.tab = Tab::Workspaces;
+        app_c.ws_pane = WsPane::Commands;
+        app_c.workspaces = vec![WorkspaceRow {
+            name: "my-workspace".into(),
+            command_count: 3,
+            first_ts: NOW - 500,
+            last_ts: NOW - 300,
+        }];
+        app_c.ws_selected = 0;
+        app_c.ws_commands = ws_rows;
+        app_c.ws_cmd_selected = 1;
+        let dump_c = render_text(&app_c);
+        println!("\n=== DUMP (c): Workspaces with Commands pane focused ===\n{dump_c}");
+
+        assert!(dump_a.contains("j/k"), "Normal mode controls must show j/k");
+        assert!(dump_b.contains("Delete"), "Delete modal must show 'Delete'");
+        assert!(
+            dump_c.contains("back"),
+            "Commands pane controls must show 'back'"
+        );
+    }
 }
