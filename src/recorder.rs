@@ -393,6 +393,72 @@ mod tests {
     }
 
     #[test]
+    fn default_history_filter_blocks_tth_sw() {
+        let mut conn = mem_conn();
+        let filters = crate::config::History::default().filter;
+        let args = RecordArgs {
+            cmd: String::from("tth-sw foo"),
+            ..base_args()
+        };
+        record(&args, DEFAULT_GAP, &filters, &mut conn);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "tth-sw must be blocked by the default filter");
+    }
+
+    #[test]
+    fn default_history_filter_blocks_bare_tth() {
+        let mut conn = mem_conn();
+        let filters = crate::config::History::default().filter;
+        let args = RecordArgs {
+            cmd: String::from("tth"),
+            ..base_args()
+        };
+        record(&args, DEFAULT_GAP, &filters, &mut conn);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "bare tth must be blocked by the default filter");
+    }
+
+    #[test]
+    fn default_history_filter_does_not_block_cargo_build() {
+        let mut conn = mem_conn();
+        let filters = crate::config::History::default().filter;
+        let args = RecordArgs {
+            cmd: String::from("cargo build"),
+            ..base_args()
+        };
+        record(&args, DEFAULT_GAP, &filters, &mut conn);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "cargo build must not be blocked by the default filter"
+        );
+    }
+
+    #[test]
+    fn default_history_filter_does_not_block_tthx() {
+        let mut conn = mem_conn();
+        let filters = crate::config::History::default().filter;
+        let args = RecordArgs {
+            cmd: String::from("tthx"),
+            ..base_args()
+        };
+        record(&args, DEFAULT_GAP, &filters, &mut conn);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "tthx must not be blocked (not a tth word boundary match)"
+        );
+    }
+
+    #[test]
     fn workspace_stored_when_provided() {
         let mut conn = mem_conn();
         let args = RecordArgs {

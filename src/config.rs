@@ -32,8 +32,10 @@ default_limit = 50
 # filter = ["^ls$", "^cd "]
 
 [history]
-# Regex patterns; matching commands are NEVER recorded (useful to avoid storing secrets).
-# filter = ["--password", "export .*TOKEN", "AKIA[0-9A-Z]{16}"]
+# Regex patterns; matching commands are NEVER recorded.
+# Thoth's own commands (tth, tth-sw, tth-tag, etc.) are ignored by default via this filter.
+# To add more patterns (e.g. secrets), extend the list:
+# filter = ["^\\s*tth\\b", "--password", "export .*TOKEN"]
 "#;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
@@ -121,10 +123,23 @@ impl Default for Search {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
+fn default_history_filter() -> Vec<String> {
+    vec!["^\\s*tth\\b".to_string()]
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 #[serde(default)]
 pub struct History {
+    #[serde(default = "default_history_filter")]
     pub filter: Vec<String>,
+}
+
+impl Default for History {
+    fn default() -> Self {
+        Self {
+            filter: default_history_filter(),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default, PartialEq)]
@@ -463,6 +478,24 @@ mod tests {
     fn parse_tui_columns_custom() {
         let cfg = parse("[tui]\ncolumns = [\"exit\", \"command\"]").unwrap();
         assert_eq!(cfg.tui.columns, vec!["exit", "command"]);
+    }
+
+    #[test]
+    fn history_default_filter_is_tth_pattern() {
+        let h = History::default();
+        assert_eq!(h.filter, vec!["^\\s*tth\\b".to_string()]);
+    }
+
+    #[test]
+    fn parse_empty_string_yields_tth_filter() {
+        let cfg = parse("").unwrap();
+        assert_eq!(cfg.history.filter, vec!["^\\s*tth\\b".to_string()]);
+    }
+
+    #[test]
+    fn parse_history_filter_replaces_default() {
+        let cfg = parse("[history]\nfilter = [\"x\"]").unwrap();
+        assert_eq!(cfg.history.filter, vec!["x".to_string()]);
     }
 
     #[test]
