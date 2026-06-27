@@ -57,8 +57,40 @@ pub enum Cmd {
         about = "Generate a new session ID (invoked by the shell hooks, not by hand)"
     )]
     NewSessionId,
-    #[command(about = "Show the resolved configuration path and effective values")]
-    Config,
+    #[command(about = "Show and manage the effective configuration")]
+    Config(ConfigArgs),
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ConfigArgs {
+    #[command(subcommand)]
+    pub action: Option<ConfigAction>,
+}
+
+#[derive(clap::Subcommand, Debug, Clone)]
+pub enum ConfigAction {
+    #[command(
+        about = "Print the canonical TOML of the loaded config (machine-readable, no color)"
+    )]
+    Print,
+    #[command(about = "Print the value for a single dotted key (e.g. tui.orientation)")]
+    Get(ConfigGetArgs),
+    #[command(about = "Set a config key to a value, preserving comments in the file")]
+    Set(ConfigSetArgs),
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ConfigGetArgs {
+    #[arg(help = "Dotted key to read (e.g. session.gap_minutes)")]
+    pub key: String,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ConfigSetArgs {
+    #[arg(help = "Dotted key to set (e.g. tui.orientation)")]
+    pub key: String,
+    #[arg(help = "New value")]
+    pub value: String,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -292,6 +324,10 @@ pub fn run() -> Result<(), crate::error::ThothError> {
             let framework = crate::prompt::detect_framework(&crate::prompt::probe_inputs());
             let snippet = crate::prompt::prompt_snippet(&framework);
             println!("\nTo show active tags in your prompt:\n{snippet}");
+            let config_path = crate::config::resolve_config_path();
+            if crate::config::ensure_default_config(&config_path)? {
+                println!("Wrote default config to {}", config_path.display());
+            }
         }
         Some(Cmd::Uninstall(args)) => {
             let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
@@ -528,11 +564,31 @@ pub fn run() -> Result<(), crate::error::ThothError> {
         Some(Cmd::NewSessionId) => {
             println!("{}", uuid::Uuid::new_v4());
         }
-        Some(Cmd::Config) => {
+        Some(Cmd::Config(args)) => {
             let cfg = crate::config::load();
             let path = crate::config::resolve_config_path();
-            let exists = path.exists();
-            print!("{}", crate::config::render_config(&cfg, &path, exists));
+            match args.action {
+                None => {
+                    let exists = path.exists();
+                    let color = crate::config::use_color();
+                    print!(
+                        "{}",
+                        crate::config::render_config(&cfg, &path, exists, color)
+                    );
+                }
+                Some(ConfigAction::Print) => {
+                    let toml = crate::config::config_toml(&cfg)?;
+                    print!("{}", toml);
+                }
+                Some(ConfigAction::Get(a)) => {
+                    let val = crate::config::get_value(&cfg, &a.key)?;
+                    println!("{}", val);
+                }
+                Some(ConfigAction::Set(a)) => {
+                    crate::config::write_set(&a.key, &a.value)?;
+                    println!("set {} = {}", a.key, a.value);
+                }
+            }
         }
     }
     Ok(())
