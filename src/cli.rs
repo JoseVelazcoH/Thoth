@@ -375,14 +375,19 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                 which_starship()
             };
             if use_starship {
+                println!("# Step 1: add this module to ~/.config/starship.toml");
                 println!("[custom.thoth_tags]");
                 println!("command = \"echo $TTH_PROMPT_TAGS\"");
                 println!("when = \"[ -n \\\"$TTH_PROMPT_TAGS\\\" ]\"");
                 println!("style = \"bold yellow\"");
                 println!("format = \"[$output]($style) \"");
+                println!("# Step 2: if you have a top-level format string, add");
+                println!("# ${{custom.thoth_tags}} to it where you want the tags to show");
+                println!("# (for example right after $git_status). Without this the");
+                println!("# module will not appear when you have a custom format.");
             } else {
-                println!("Add to your PROMPT (zsh) or PS1 (bash):");
-                println!("  ${{TTH_PROMPT_TAGS}}");
+                println!("Add ${{TTH_PROMPT_TAGS}} to your PROMPT (zsh) or PS1 (bash)");
+                println!("where you want active tags to show.");
             }
         }
         Some(Cmd::NewSessionId) => {
