@@ -9,8 +9,6 @@ use ratatui::{
 use crate::tui::app::App;
 use crate::tui::time::format_relative;
 
-pub const BOTTOM_ANCHORED: bool = true;
-
 pub fn display_command(raw: &str) -> String {
     let collapsed: String = raw
         .chars()
@@ -91,7 +89,7 @@ const ACCENT: Color = Color::Cyan;
 const DIM_COLOR: Color = Color::DarkGray;
 const BORDER_COLOR: Color = Color::DarkGray;
 
-pub fn draw(frame: &mut Frame, app: &App, now: i64, table_state: &mut TableState) {
+pub fn draw(frame: &mut Frame, app: &App, now: i64, is_bottom: bool, table_state: &mut TableState) {
     let area = frame.area();
 
     let chunks = Layout::vertical([
@@ -178,10 +176,14 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64, table_state: &mut TableState
     let cyan = Style::default().fg(ACCENT);
     let blue = Style::default().fg(Color::Blue);
 
-    let rows: Vec<Row> = app
-        .filtered
+    let ordered: Vec<usize> = if is_bottom {
+        app.filtered.iter().rev().copied().collect()
+    } else {
+        app.filtered.to_vec()
+    };
+
+    let rows: Vec<Row> = ordered
         .iter()
-        .rev()
         .map(|&fi| {
             let row = &app.all_rows[fi];
             let rel = format_relative(row.timestamp, now);
@@ -223,7 +225,11 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64, table_state: &mut TableState
     if app.filtered.is_empty() {
         table_state.select(None);
     } else {
-        let display_idx = app.filtered.len() - 1 - app.selected;
+        let display_idx = if is_bottom {
+            app.filtered.len() - 1 - app.selected
+        } else {
+            app.selected
+        };
         table_state.select(Some(display_idx));
     }
     frame.render_stateful_widget(table, inner_list_area, table_state);
@@ -281,7 +287,9 @@ mod tests {
         let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut ts = TableState::default();
-        terminal.draw(|f| draw(f, app, TEST_NOW, &mut ts)).unwrap();
+        terminal
+            .draw(|f| draw(f, app, TEST_NOW, true, &mut ts))
+            .unwrap();
         let buf = terminal.backend().buffer().clone();
         let mut lines: Vec<String> = Vec::new();
         for row in 0..TEST_HEIGHT {
@@ -387,7 +395,9 @@ mod tests {
         let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut ts = TableState::default();
-        terminal.draw(|f| draw(f, &app, TEST_NOW, &mut ts)).unwrap();
+        terminal
+            .draw(|f| draw(f, &app, TEST_NOW, true, &mut ts))
+            .unwrap();
         let buf = terminal.backend().buffer().clone();
 
         let any_reversed = (0..TEST_HEIGHT).any(|row_y| {
@@ -484,7 +494,9 @@ mod tests {
         let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut ts = TableState::default();
-        terminal.draw(|f| draw(f, &app, TEST_NOW, &mut ts)).unwrap();
+        terminal
+            .draw(|f| draw(f, &app, TEST_NOW, true, &mut ts))
+            .unwrap();
         let buf = terminal.backend().buffer().clone();
 
         let reversed_count = (0..TEST_WIDTH)
@@ -541,7 +553,9 @@ mod tests {
         let backend = TestBackend::new(SMALL_WIDTH, SMALL_HEIGHT);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut ts = TableState::default();
-        terminal.draw(|f| draw(f, &app, TEST_NOW, &mut ts)).unwrap();
+        terminal
+            .draw(|f| draw(f, &app, TEST_NOW, true, &mut ts))
+            .unwrap();
         let buf = terminal.backend().buffer().clone();
 
         let mut full_text = String::new();
@@ -682,7 +696,7 @@ mod tests {
     ) -> (String, ratatui::buffer::Buffer) {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, app, TEST_NOW, ts)).unwrap();
+        terminal.draw(|f| draw(f, app, TEST_NOW, true, ts)).unwrap();
         let buf = terminal.backend().buffer().clone();
         let mut lines: Vec<String> = Vec::new();
         for row in 0..height {
@@ -708,11 +722,6 @@ mod tests {
     }
 
     #[test]
-    fn bottom_anchored_flag_is_true() {
-        const { assert!(BOTTOM_ANCHORED, "orientation must be bottom-anchored") };
-    }
-
-    #[test]
     fn newest_command_renders_below_oldest() {
         let app = app_bottom_anchored();
         let (_, buf) = render_app_small(&app, TEST_WIDTH, TEST_HEIGHT);
@@ -723,6 +732,26 @@ mod tests {
         assert!(
             newest_y > oldest_y,
             "newest command must appear on a lower (higher y) row than oldest; newest_y={newest_y} oldest_y={oldest_y}"
+        );
+    }
+
+    #[test]
+    fn top_orientation_renders_newest_above_oldest() {
+        let app = app_bottom_anchored();
+        let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ts = TableState::default();
+        terminal
+            .draw(|f| draw(f, &app, TEST_NOW, false, &mut ts))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let newest_y = row_y_of("newest-cmd", &buf, TEST_WIDTH, TEST_HEIGHT)
+            .expect("newest-cmd must appear in buffer");
+        let oldest_y = row_y_of("oldest-cmd", &buf, TEST_WIDTH, TEST_HEIGHT)
+            .expect("oldest-cmd must appear in buffer");
+        assert!(
+            newest_y < oldest_y,
+            "with top orientation newest must be above oldest; newest_y={newest_y} oldest_y={oldest_y}"
         );
     }
 
