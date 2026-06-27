@@ -271,6 +271,115 @@ fn uninstall_removes_sentinel_from_rc_file() {
 }
 
 #[test]
+fn init_zsh_prints_hook_script() {
+    let output = tth().args(["init", "zsh"]).output().unwrap();
+    assert!(output.status.success(), "tth init zsh must exit 0");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("_tth_preexec"), "missing _tth_preexec");
+    assert!(stdout.contains("_tth_precmd"), "missing _tth_precmd");
+    assert!(stdout.contains("bindkey '^R'"), "missing bindkey '^R'");
+    assert!(stdout.contains("tth|tth\\ *"), "missing capture exclusion");
+    assert!(
+        !stdout.contains("# === THOTH HOOKS BEGIN ==="),
+        "raw script must not contain sentinel"
+    );
+}
+
+#[test]
+fn init_bash_prints_hook_script() {
+    let output = tth().args(["init", "bash"]).output().unwrap();
+    assert!(output.status.success(), "tth init bash must exit 0");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("_thoth_preexec"), "missing _thoth_preexec");
+    assert!(stdout.contains("_thoth_precmd"), "missing _thoth_precmd");
+    assert!(stdout.contains("bind -x"), "missing bind -x");
+    assert!(stdout.contains("tth|tth\\ *"), "missing capture exclusion");
+    assert!(
+        !stdout.contains("# === THOTH HOOKS BEGIN ==="),
+        "raw script must not contain sentinel"
+    );
+}
+
+#[test]
+fn init_unknown_shell_exits_nonzero() {
+    tth()
+        .args(["init", "fish"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::starts_with("tth: "));
+}
+
+#[test]
+fn install_writes_eval_line_not_full_body() {
+    let dir = TempDir::new().unwrap();
+    let rc = dir.path().join(".zshrc");
+    let db_path = dir.path().join("history.db");
+    tth()
+        .env("THOTH_DB", db_path.to_str().unwrap())
+        .env(
+            "THOTH_ERROR_LOG",
+            dir.path().join("error.log").to_str().unwrap(),
+        )
+        .args([
+            "install",
+            "--shell",
+            "zsh",
+            "--rc-file",
+            rc.to_str().unwrap(),
+        ])
+        .assert()
+        .code(0);
+    let content = std::fs::read_to_string(&rc).unwrap();
+    assert!(
+        content.contains("eval \"$(tth init zsh)\""),
+        "eval line not found; got:\n{content}"
+    );
+    assert!(
+        !content.contains("_tth_preexec"),
+        "full hook body must not be written to rc"
+    );
+}
+
+#[test]
+fn install_migration_replaces_old_full_block() {
+    let dir = TempDir::new().unwrap();
+    let rc = dir.path().join(".zshrc");
+    let db_path = dir.path().join("history.db");
+    let old_block =
+        "# === THOTH HOOKS BEGIN ===\n_tth_preexec() { : ; }\n# === THOTH HOOKS END ===\n";
+    std::fs::write(&rc, old_block).unwrap();
+    tth()
+        .env("THOTH_DB", db_path.to_str().unwrap())
+        .env(
+            "THOTH_ERROR_LOG",
+            dir.path().join("error.log").to_str().unwrap(),
+        )
+        .args([
+            "install",
+            "--shell",
+            "zsh",
+            "--rc-file",
+            rc.to_str().unwrap(),
+        ])
+        .assert()
+        .code(0);
+    let content = std::fs::read_to_string(&rc).unwrap();
+    assert_eq!(
+        content.matches("# === THOTH HOOKS BEGIN ===").count(),
+        1,
+        "expected exactly one sentinel block"
+    );
+    assert!(
+        content.contains("eval \"$(tth init zsh)\""),
+        "eval line not found after migration"
+    );
+    assert!(
+        !content.contains("_tth_preexec() { : ; }"),
+        "old body still present after migration"
+    );
+}
+
+#[test]
 fn status_exits_0_and_prints_info() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("history.db");
