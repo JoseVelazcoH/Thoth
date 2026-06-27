@@ -373,21 +373,22 @@ mod tests {
     #[test]
     fn sessions_up_changes_session_selected_not_history_selected() {
         let mut app = app_with_sessions();
+        app.session_selected = 1;
         let history_selected_before = app.selected;
         handle_key(key(KeyCode::Up), &mut app);
         assert_eq!(
             app.selected, history_selected_before,
             "history selected must not change"
         );
-        assert_eq!(app.session_selected, 1);
+        assert_eq!(app.session_selected, 0);
     }
 
     #[test]
-    fn sessions_down_decreases_session_selected() {
+    fn sessions_down_increases_session_selected() {
         let mut app = app_with_sessions();
-        app.session_selected = 1;
+        app.session_selected = 0;
         handle_key(key(KeyCode::Down), &mut app);
-        assert_eq!(app.session_selected, 0);
+        assert_eq!(app.session_selected, 1);
     }
 
     #[test]
