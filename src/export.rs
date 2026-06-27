@@ -177,17 +177,19 @@ pub fn render_replay_command(rows: &[ExportRow]) -> String {
     if rows.is_empty() {
         return "true".to_string();
     }
-    let mut parts: Vec<String> = Vec::new();
+    let mut units: Vec<String> = Vec::new();
     let mut prev_dir: Option<&str> = None;
     for row in rows {
-        if prev_dir != Some(row.directory.as_str()) {
+        let unit = if prev_dir != Some(row.directory.as_str()) {
             let escaped_dir = row.directory.replace('\'', "'\\''");
-            parts.push(format!("cd '{escaped_dir}'"));
             prev_dir = Some(row.directory.as_str());
-        }
-        parts.push(row.command.clone());
+            format!("cd '{escaped_dir}' && {}", row.command)
+        } else {
+            row.command.clone()
+        };
+        units.push(unit);
     }
-    let joined = parts.join(" && \\\n");
+    let joined = units.join(" ; \\\n");
     format!("( {joined} )")
 }
 
@@ -791,7 +793,8 @@ mod tests {
     }
 
     #[test]
-    fn render_replay_command_uses_ampersand_continuation() {
+    fn render_replay_command_separates_units_with_semicolon_so_one_failure_does_not_stop_the_rest()
+    {
         let rows = vec![
             ExportRow {
                 command: "cmd-a".into(),
@@ -810,8 +813,12 @@ mod tests {
         ];
         let out = render_replay_command(&rows);
         assert!(
-            out.contains(" && \\\n"),
-            "parts must be joined with ' && \\\\n'; got:\n{out}"
+            out.contains(" ; \\\n"),
+            "units must be separated with ' ; \\\\n' so a non-zero exit does not halt the rest; got:\n{out}"
+        );
+        assert!(
+            out.contains("cd '/d' && cmd-a"),
+            "cd must guard its command; got:\n{out}"
         );
     }
 }
