@@ -12,6 +12,7 @@ use crate::tui::time::format_relative;
 use crate::workspaces::WorkspaceRow;
 
 const ACCENT: Color = Color::Cyan;
+const SELECTION_BG: Color = Color::Indexed(147);
 const DIM_COLOR: Color = Color::DarkGray;
 const EDIT_MODAL_W: u16 = 60;
 const EDIT_MODAL_H: u16 = 5;
@@ -145,7 +146,7 @@ fn tui_cell(col: &Column, row: &CommandRow, now: i64, width: u16) -> Cell<'stati
         Column::Exit => Style::default().fg(exit_text(row.exit_code).1),
         Column::Project => Style::default().fg(Color::Blue),
         Column::Directory => Style::default().fg(DIM_COLOR),
-        Column::Command => Style::default().fg(Color::Green),
+        Column::Command => Style::default(),
         Column::Tags => Style::default(),
     };
     Cell::from(Line::from(vec![Span::styled(text, style)]))
@@ -290,7 +291,7 @@ fn render_history_pane(
     let table_header = Row::new(header_cells);
 
     let highlight_style = Style::default()
-        .bg(ACCENT)
+        .bg(SELECTION_BG)
         .fg(Color::Black)
         .add_modifier(Modifier::BOLD);
 
@@ -322,7 +323,7 @@ fn render_workspaces_pane(
 ) {
     let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
     let highlight_style = Style::default()
-        .bg(ACCENT)
+        .bg(SELECTION_BG)
         .fg(Color::Black)
         .add_modifier(Modifier::BOLD);
 
@@ -501,7 +502,9 @@ pub fn draw_with_cmd_state(
     render_tab_bar(frame, tabbar_area, app);
 
     let version = env!("CARGO_PKG_VERSION");
-    let accent_style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+    let accent_style = Style::default()
+        .fg(Color::Green)
+        .add_modifier(Modifier::BOLD);
     let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
     let green_bold = Style::default()
         .fg(Color::Green)
@@ -966,7 +969,7 @@ mod tests {
         let buf = render_app_buf(&app);
 
         let any_cyan_bg = (0..TEST_HEIGHT)
-            .any(|row_y| (0..TEST_WIDTH).any(|x| buf[(x, row_y)].style().bg == Some(Color::Cyan)));
+            .any(|row_y| (0..TEST_WIDTH).any(|x| buf[(x, row_y)].style().bg == Some(SELECTION_BG)));
         assert!(
             any_cyan_bg,
             "Workspaces tab must have bg=Cyan on selected row"
@@ -1161,7 +1164,7 @@ mod tests {
         let buf = render_app_buf(&app);
 
         let any_cyan_bg = (0..TEST_HEIGHT)
-            .any(|row_y| (0..TEST_WIDTH).any(|x| buf[(x, row_y)].style().bg == Some(Color::Cyan)));
+            .any(|row_y| (0..TEST_WIDTH).any(|x| buf[(x, row_y)].style().bg == Some(SELECTION_BG)));
         assert!(
             any_cyan_bg,
             "selected row must have bg=Cyan highlight somewhere in the frame"
@@ -1678,7 +1681,8 @@ mod tests {
         height: u16,
     ) -> Option<String> {
         for row in 0..height {
-            let any_cyan_bg = (0..width).any(|col| buf[(col, row)].style().bg == Some(Color::Cyan));
+            let any_cyan_bg =
+                (0..width).any(|col| buf[(col, row)].style().bg == Some(SELECTION_BG));
             if any_cyan_bg {
                 let line: String = (0..width)
                     .map(|col| buf[(col, row)].symbol().chars().next().unwrap_or(' '))
