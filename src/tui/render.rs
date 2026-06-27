@@ -171,9 +171,9 @@ pub fn resolve_tui_columns(names: &[String]) -> Vec<Column> {
 fn render_tab_bar(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
     let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
     let active_style = Style::default()
-        .fg(Color::Green)
-        .add_modifier(Modifier::BOLD)
-        .add_modifier(Modifier::REVERSED);
+        .bg(SELECTION_BG)
+        .fg(Color::Black)
+        .add_modifier(Modifier::BOLD);
 
     let (history_style, workspaces_style) = match app.tab {
         Tab::History => (active_style, dim_style),
@@ -880,33 +880,21 @@ mod tests {
     }
 
     #[test]
-    fn tab_bar_active_history_is_reversed() {
+    fn tab_bar_active_history_is_highlighted() {
         let app = app_with_rows();
         let buf = render_app_buf(&app);
 
-        let any_reversed_row0 = (0..TEST_WIDTH).any(|x| {
-            buf[(x, 0)]
-                .style()
-                .add_modifier
-                .contains(Modifier::REVERSED)
-        });
-        assert!(
-            any_reversed_row0,
-            "tab bar row 0 must have REVERSED on active History tab label"
-        );
-
-        let reversed_count_row0 = (0..TEST_WIDTH)
-            .filter(|&x| {
-                buf[(x, 0)]
-                    .style()
-                    .add_modifier
-                    .contains(Modifier::REVERSED)
-            })
+        let active_bg_count = (0..TEST_WIDTH)
+            .filter(|&x| buf[(x, 0)].style().bg == Some(SELECTION_BG))
             .count();
 
         assert!(
-            reversed_count_row0 < TEST_WIDTH as usize,
-            "tab bar must NOT be fully reversed; only active label should be reversed (count={reversed_count_row0})"
+            active_bg_count > 0,
+            "tab bar row 0 must highlight the active History tab with the selection background"
+        );
+        assert!(
+            active_bg_count < TEST_WIDTH as usize,
+            "tab bar must NOT be fully highlighted; only the active label (count={active_bg_count})"
         );
     }
 
