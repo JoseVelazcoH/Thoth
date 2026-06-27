@@ -430,6 +430,67 @@ _run_bash_parse_edit_prefix() {
     fi
 }
 
+_run_init_zsh_syntax_check() {
+    if ! command -v zsh >/dev/null 2>&1; then
+        _skip "zsh not available for init zsh syntax check"
+        return
+    fi
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' RETURN
+    local script_file="$tmpdir/init_zsh.zsh"
+    "$TTH_BIN" init zsh > "$script_file" 2>/dev/null
+    if zsh -n "$script_file" 2>/dev/null; then
+        _pass "tth init zsh: output is syntactically valid zsh"
+    else
+        _fail "tth init zsh: syntax error in output"
+    fi
+}
+
+_run_init_bash_syntax_check() {
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' RETURN
+    local script_file="$tmpdir/init_bash.bash"
+    "$TTH_BIN" init bash > "$script_file" 2>/dev/null
+    if bash -n "$script_file" 2>/dev/null; then
+        _pass "tth init bash: output is syntactically valid bash"
+    else
+        _fail "tth init bash: syntax error in output"
+    fi
+}
+
+_run_init_zsh_defines_hooks() {
+    if ! command -v zsh >/dev/null 2>&1; then
+        _skip "zsh not available for init zsh function-definition check"
+        return
+    fi
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' RETURN
+    local stub_bin="$tmpdir/tth"
+    cat > "$stub_bin" <<'STUB'
+#!/usr/bin/env bash
+echo "$@"
+STUB
+    chmod +x "$stub_bin"
+    local result
+    result="$(PATH="$tmpdir:$PATH" TTH_SESSION_ID="test" zsh --no-rcs -c "
+        source <(\"$TTH_BIN\" init zsh) 2>/dev/null || true
+        typeset -f _tth_preexec >/dev/null 2>&1 && echo defined_preexec
+        typeset -f _tth_precmd  >/dev/null 2>&1 && echo defined_precmd
+        typeset -f _tth_widget  >/dev/null 2>&1 && echo defined_widget
+    " 2>/dev/null)"
+    local ok=1
+    for marker in defined_preexec defined_precmd defined_widget; do
+        if [[ "$result" != *"$marker"* ]]; then
+            _fail "tth init zsh: $marker not defined after sourcing output"
+            ok=0
+        fi
+    done
+    [[ $ok -eq 1 ]] && _pass "tth init zsh: hook functions defined after sourcing output"
+}
+
 echo "=== Thoth shell hook smoke tests ==="
 _run_bash_version_check
 _run_bash_syntax_check
@@ -449,6 +510,9 @@ _run_zsh_parse_run_prefix
 _run_zsh_parse_edit_prefix
 _run_bash_parse_run_prefix
 _run_bash_parse_edit_prefix
+_run_init_zsh_syntax_check
+_run_init_bash_syntax_check
+_run_init_zsh_defines_hooks
 
 echo "---"
 echo "PASS=$PASS FAIL=$FAIL SKIP=$SKIP"
