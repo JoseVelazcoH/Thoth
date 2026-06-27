@@ -140,8 +140,6 @@ pub struct TagsArgs {
 #[derive(clap::Args, Debug, Clone)]
 pub struct PromptArgs {
     #[arg(long)]
-    pub shell: Option<String>,
-    #[arg(long)]
     pub framework: Option<String>,
 }
 
