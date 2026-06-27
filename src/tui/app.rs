@@ -101,15 +101,15 @@ impl App {
     }
 
     pub fn move_up(&mut self) {
-        if self.selected > 0 {
-            self.selected -= 1;
+        let max = self.filtered.len().saturating_sub(1);
+        if self.selected < max {
+            self.selected += 1;
         }
     }
 
     pub fn move_down(&mut self) {
-        let max = self.filtered.len().saturating_sub(1);
-        if self.selected < max {
-            self.selected += 1;
+        if self.selected > 0 {
+            self.selected -= 1;
         }
     }
 }
@@ -200,27 +200,27 @@ mod tests {
     }
 
     #[test]
-    fn move_down_clamps_at_last() {
+    fn move_up_clamps_at_oldest() {
         let conn = make_conn();
         seed(&conn, "a", 1000);
         seed(&conn, "b", 2000);
         let mut app = App::new();
         app.reload(&conn, 9999).unwrap();
-        app.move_down();
-        app.move_down();
-        app.move_down();
+        app.move_up();
+        app.move_up();
+        app.move_up();
         assert_eq!(app.selected, 1);
     }
 
     #[test]
-    fn move_up_clamps_at_zero() {
+    fn move_down_clamps_at_newest() {
         let conn = make_conn();
         seed(&conn, "a", 1000);
         seed(&conn, "b", 2000);
         let mut app = App::new();
         app.reload(&conn, 9999).unwrap();
-        app.move_up();
-        app.move_up();
+        app.move_down();
+        app.move_down();
         assert_eq!(app.selected, 0);
     }
 

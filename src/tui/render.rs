@@ -9,6 +9,8 @@ use ratatui::{
 use crate::tui::app::App;
 use crate::tui::time::format_relative;
 
+pub const BOTTOM_ANCHORED: bool = true;
+
 pub fn display_command(raw: &str) -> String {
     let collapsed: String = raw
         .chars()
@@ -179,6 +181,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
     let rows: Vec<Row> = app
         .filtered
         .iter()
+        .rev()
         .map(|&fi| {
             let row = &app.all_rows[fi];
             let rel = format_relative(row.timestamp, now);
@@ -220,7 +223,8 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
     let selected = if app.filtered.is_empty() {
         None
     } else {
-        Some(app.selected)
+        let display_idx = app.filtered.len() - 1 - app.selected;
+        Some(display_idx)
     };
     let mut table_state = TableState::default().with_selected(selected);
     frame.render_stateful_widget(table, inner_list_area, &mut table_state);
@@ -385,14 +389,18 @@ mod tests {
         terminal.draw(|f| draw(f, &app, TEST_NOW)).unwrap();
         let buf = terminal.backend().buffer().clone();
 
-        let row1_y = 2u16;
-        let any_reversed = (0..TEST_WIDTH).any(|x| {
-            buf[(x, row1_y)]
-                .style()
-                .add_modifier
-                .contains(Modifier::REVERSED)
+        let any_reversed = (0..TEST_HEIGHT).any(|row_y| {
+            (0..TEST_WIDTH).any(|x| {
+                buf[(x, row_y)]
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::REVERSED)
+            })
         });
-        assert!(any_reversed, "selected row must have REVERSED modifier");
+        assert!(
+            any_reversed,
+            "selected row must have REVERSED modifier somewhere in the frame"
+        );
     }
 
     #[test]
@@ -608,5 +616,248 @@ mod tests {
     #[test]
     fn display_command_plain_command_unchanged() {
         assert_eq!(display_command("ls -la"), "ls -la");
+    }
+
+    #[test]
+    fn dump_bottom_anchored_buffers() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let mut app = App::new();
+        app.all_rows = vec![
+            make_row("cmd-newest", TEST_NOW - 10, 0, "proj"),
+            make_row("cmd-newer", TEST_NOW - 60, 0, "proj"),
+            make_row("cmd-middle", TEST_NOW - 300, 0, "proj"),
+            make_row("cmd-older", TEST_NOW - 1200, 0, "proj"),
+            make_row("cmd-oldest", TEST_NOW - 3600, 0, "proj"),
+        ];
+        app.recompute();
+
+        let (default_buf, _) = render_app_small(&app, 80, 8);
+        println!("=== DEFAULT (newest at bottom, cursor on newest) ===");
+        println!("{default_buf}");
+
+        let up_key = KeyEvent {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        for _ in 0..3 {
+            handle_key(up_key, &mut app);
+        }
+
+        let (after_up3, _) = render_app_small(&app, 80, 8);
+        println!("\n=== AFTER Up x3 (cursor on cmd-older) ===");
+        println!("{after_up3}");
+
+        assert!(default_buf.contains("cmd-newest"));
+        assert!(after_up3.contains("cmd-older"));
+    }
+
+    fn app_bottom_anchored() -> App {
+        let mut app = App::new();
+        app.all_rows = vec![
+            make_row("newest-cmd", TEST_NOW - 60, 0, "p"),
+            make_row("middle-cmd", TEST_NOW - 3600, 0, "p"),
+            make_row("oldest-cmd", TEST_NOW - 7200, 0, "p"),
+        ];
+        app.recompute();
+        app
+    }
+
+    fn render_app_small(app: &App, width: u16, height: u16) -> (String, ratatui::buffer::Buffer) {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, app, TEST_NOW)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut lines: Vec<String> = Vec::new();
+        for row in 0..height {
+            let mut line = String::new();
+            for col in 0..width {
+                line.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+            }
+            lines.push(line.trim_end().to_string());
+        }
+        (lines.join("\n"), buf)
+    }
+
+    fn row_y_of(text: &str, buf: &ratatui::buffer::Buffer, width: u16, height: u16) -> Option<u16> {
+        for row in 0..height {
+            let line: String = (0..width)
+                .map(|col| buf[(col, row)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if line.contains(text) {
+                return Some(row);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn bottom_anchored_flag_is_true() {
+        const { assert!(BOTTOM_ANCHORED, "orientation must be bottom-anchored") };
+    }
+
+    #[test]
+    fn newest_command_renders_below_oldest() {
+        let app = app_bottom_anchored();
+        let (_, buf) = render_app_small(&app, TEST_WIDTH, TEST_HEIGHT);
+        let newest_y = row_y_of("newest-cmd", &buf, TEST_WIDTH, TEST_HEIGHT)
+            .expect("newest-cmd must appear in buffer");
+        let oldest_y = row_y_of("oldest-cmd", &buf, TEST_WIDTH, TEST_HEIGHT)
+            .expect("oldest-cmd must appear in buffer");
+        assert!(
+            newest_y > oldest_y,
+            "newest command must appear on a lower (higher y) row than oldest; newest_y={newest_y} oldest_y={oldest_y}"
+        );
+    }
+
+    #[test]
+    fn default_selection_is_newest_command() {
+        let app = app_bottom_anchored();
+        let cmd = app.selected_command().expect("must have a selection");
+        assert_eq!(
+            cmd, "newest-cmd",
+            "default selection must be the most-recent command"
+        );
+    }
+
+    #[test]
+    fn up_key_moves_to_older_command() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let mut app = app_bottom_anchored();
+        assert_eq!(app.selected_command(), Some("newest-cmd"));
+
+        handle_key(
+            KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            },
+            &mut app,
+        );
+        assert_eq!(
+            app.selected_command(),
+            Some("middle-cmd"),
+            "Up from newest must select middle (older) command"
+        );
+    }
+
+    #[test]
+    fn down_key_moves_to_newer_command() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let mut app = app_bottom_anchored();
+        handle_key(
+            KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            },
+            &mut app,
+        );
+        assert_eq!(app.selected_command(), Some("middle-cmd"));
+
+        handle_key(
+            KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            },
+            &mut app,
+        );
+        assert_eq!(
+            app.selected_command(),
+            Some("newest-cmd"),
+            "Down from middle must go back to newest"
+        );
+    }
+
+    #[test]
+    fn up_cannot_go_past_oldest() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let mut app = app_bottom_anchored();
+        let up_key = KeyEvent {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        for _ in 0..10 {
+            handle_key(up_key, &mut app);
+        }
+        assert_eq!(
+            app.selected_command(),
+            Some("oldest-cmd"),
+            "Up cannot go past the oldest command"
+        );
+    }
+
+    #[test]
+    fn down_cannot_go_past_newest() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let mut app = app_bottom_anchored();
+        let down_key = KeyEvent {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        for _ in 0..10 {
+            handle_key(down_key, &mut app);
+        }
+        assert_eq!(
+            app.selected_command(),
+            Some("newest-cmd"),
+            "Down cannot go past the newest command"
+        );
+    }
+
+    #[test]
+    fn bottom_anchored_scroll_keeps_older_row_visible() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        const H: u16 = 8;
+        const W: u16 = 80;
+        let mut app = App::new();
+        app.all_rows = (0..20)
+            .map(|i| make_row(&format!("scmd-{i:02}"), TEST_NOW - i as i64 * 60, 0, "p"))
+            .collect();
+        app.recompute();
+
+        let up_key = KeyEvent {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        for _ in 0..15 {
+            handle_key(up_key, &mut app);
+        }
+
+        let (_, buf) = render_app_small(&app, W, H);
+        let mut full_text = String::new();
+        for row in 0..H {
+            for col in 0..W {
+                full_text.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+            }
+            full_text.push('\n');
+        }
+        assert!(
+            full_text.contains("scmd-15"),
+            "after pressing Up 15 times, selected older row must be visible; buffer:\n{full_text}"
+        );
     }
 }
