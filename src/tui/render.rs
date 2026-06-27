@@ -570,6 +570,7 @@ mod tests {
             tags: "[]".to_string(),
             session_id: "s1".to_string(),
             duration_ms: 100,
+            workspace: None,
         }
     }
 

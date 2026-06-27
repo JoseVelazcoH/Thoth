@@ -59,6 +59,10 @@ pub enum Cmd {
     NewSessionId,
     #[command(about = "Show and manage the effective configuration")]
     Config(ConfigArgs),
+    #[command(about = "Start or end a workspace session (use tth-sw / tth-ew shell functions)")]
+    Workspace(WorkspaceArgs),
+    #[command(about = "List recorded workspaces with command counts")]
+    Workspaces,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -91,6 +95,26 @@ pub struct ConfigSetArgs {
     pub key: String,
     #[arg(help = "New value")]
     pub value: String,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct WorkspaceArgs {
+    #[command(subcommand)]
+    pub action: WorkspaceAction,
+}
+
+#[derive(clap::Subcommand, Debug, Clone)]
+pub enum WorkspaceAction {
+    #[command(about = "Activate a workspace by name (eval the output)")]
+    Start(WorkspaceStartArgs),
+    #[command(about = "Deactivate the current workspace (eval the output)")]
+    End,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct WorkspaceStartArgs {
+    #[arg(help = "Workspace name to activate")]
+    pub name: String,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -129,6 +153,8 @@ pub struct RecordArgs {
     pub tags: String,
     #[arg(long = "terminal-id", help = "Identifier for the terminal session")]
     pub terminal_id: Option<String>,
+    #[arg(long, help = "Active workspace name (set by the shell hook)")]
+    pub workspace: Option<String>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -613,6 +639,39 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                     crate::config::write_set(&a.key, &a.value)?;
                     println!("set {} = {}", a.key, a.value);
                 }
+            }
+        }
+        Some(Cmd::Workspace(args)) => match args.action {
+            WorkspaceAction::Start(a) => {
+                if a.name.is_empty() {
+                    return Err(crate::error::ThothError::Hook(
+                        "workspace name cannot be empty".into(),
+                    ));
+                }
+                print!("{}", crate::workspaces::start_line(&a.name));
+                eprintln!("Active workspace: {}", a.name);
+            }
+            WorkspaceAction::End => {
+                print!("{}", crate::workspaces::end_line());
+                eprintln!("Workspace deactivated.");
+            }
+        },
+        Some(Cmd::Workspaces) => {
+            let conn = crate::database::get_connection(None)?;
+            let rows = crate::workspaces::list_workspaces(&conn)?;
+            if rows.is_empty() {
+                println!("(no workspaces recorded)");
+            } else {
+                use comfy_table::{presets::UTF8_BORDERS_ONLY, ContentArrangement, Table};
+                let mut table = Table::new();
+                table.load_preset(UTF8_BORDERS_ONLY);
+                table.set_content_arrangement(ContentArrangement::Dynamic);
+                table.set_header(vec!["workspace", "commands", "last used"]);
+                for row in &rows {
+                    let last = crate::search::fmt_timestamp_pub(row.last_ts);
+                    table.add_row(vec![row.name.clone(), row.command_count.to_string(), last]);
+                }
+                println!("{table}");
             }
         }
     }

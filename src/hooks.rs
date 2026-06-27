@@ -426,7 +426,7 @@ mod tests {
         let conn = mem_conn();
         let s = status(&conn, &rc, false, false);
         assert!(s.hooks_installed);
-        assert_eq!(s.schema_version, 3);
+        assert_eq!(s.schema_version, 4);
         assert_eq!(s.total_commands, 0);
     }
 

@@ -140,6 +140,7 @@ mod tests {
                 directory: String::from("/tmp"),
                 command: String::from("git status"),
                 session_id: String::from("s1"),
+                workspace: None,
             },
             crate::search::CommandRow {
                 timestamp: 1000,
@@ -150,6 +151,7 @@ mod tests {
                 directory: String::from("/tmp"),
                 command: String::from("ls -la"),
                 session_id: String::from("s1"),
+                workspace: None,
             },
         ];
         app.recompute();
