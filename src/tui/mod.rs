@@ -5,6 +5,7 @@ pub mod render;
 pub mod time;
 
 use std::fs::OpenOptions;
+use std::io::IsTerminal;
 use std::panic;
 
 use crossterm::{
@@ -168,7 +169,15 @@ pub fn run(
             .to_str()
             .ok_or_else(|| ThothError::Tui("replay path is not valid UTF-8".into()))?
             .to_string();
-        app.action = Some(Action::Replay(path_str));
+        if std::io::stdout().is_terminal() {
+            println!("Replaying workspace '{ws_name}'...");
+            std::process::Command::new("bash")
+                .arg(&path)
+                .status()
+                .map_err(|e| ThothError::Tui(format!("replay run failed: {e}")))?;
+        } else {
+            app.action = Some(Action::Replay(path_str));
+        }
     }
 
     if let Some(line) = format_action_line(app.action.as_ref()) {
