@@ -11,6 +11,7 @@ pub struct ExportArgs {
     pub project: Option<String>,
     pub since: Option<String>,
     pub exit: Option<ExitFilter>,
+    pub workspace: Option<String>,
 }
 
 pub struct ExportRow {
@@ -64,6 +65,11 @@ pub fn build_query(
     for tag in &args.tag {
         fragments.push("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE value = ?)".to_string());
         params.push(Box::new(tag.clone()));
+    }
+
+    if let Some(ref ws) = args.workspace {
+        fragments.push("c.workspace = ?".to_string());
+        params.push(Box::new(ws.clone()));
     }
 
     let sql = if fragments.is_empty() {
@@ -167,6 +173,19 @@ pub fn render_script(rows: &[ExportRow], meta: &ExportMeta<'_>, now: i64) -> Str
     out
 }
 
+pub fn render_replay_script(rows: &[ExportRow]) -> String {
+    let mut out = String::new();
+    out.push_str("#!/usr/bin/env bash\n");
+    out.push_str("set -e\n");
+    for row in rows {
+        let escaped_dir = row.directory.replace('\'', "'\\''");
+        out.push_str(&format!("cd '{escaped_dir}'\n"));
+        out.push_str(&row.command);
+        out.push('\n');
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,6 +199,7 @@ mod tests {
             project: None,
             since: None,
             exit: None,
+            workspace: None,
         }
     }
 
@@ -342,6 +362,7 @@ mod tests {
             since: Some("today".into()),
             exit: Some(ExitFilter::Ok),
             session: Some("sess-x".into()),
+            workspace: None,
         };
         let (sql, params) = build_query(&args, FIXED_NOW).unwrap();
         assert!(sql.contains("c.project = ?"));
@@ -559,5 +580,192 @@ mod tests {
         let rows = collect(&conn, &args, FIXED_NOW).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].command, "new_cmd");
+    }
+
+    fn seed_with_dir(conn: &rusqlite::Connection, r: SeedRow<'_>, dir: &str, ws: Option<&str>) {
+        conn.execute(
+            "INSERT INTO commands(command, directory, project, session_id, timestamp, exit_code, duration_ms, tags, workspace) \
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![r.cmd, dir, r.project, r.session, r.ts, r.exit, r.dur, r.tags, ws],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn build_query_workspace_filter_adds_clause() {
+        let args = ExportArgs {
+            workspace: Some("my-ws".into()),
+            ..default_args()
+        };
+        let (sql, params) = build_query(&args, FIXED_NOW).unwrap();
+        assert!(
+            sql.contains("c.workspace = ?"),
+            "must include workspace clause; got: {sql}"
+        );
+        assert!(sql.contains("ORDER BY c.timestamp ASC"));
+        assert_eq!(params.len(), 1);
+    }
+
+    #[test]
+    fn collect_workspace_filter_returns_only_that_workspace() {
+        let conn = mem_conn();
+        let r_a = s("cmd-ws-a", "p", 1_000, 0, 100, "[]", "s1");
+        let r_b = s("cmd-ws-b", "p", 2_000, 0, 100, "[]", "s1");
+        seed_with_dir(&conn, r_a, "/dir-a", Some("ws-a"));
+        seed_with_dir(&conn, r_b, "/dir-b", Some("ws-b"));
+        let args = ExportArgs {
+            workspace: Some("ws-a".into()),
+            ..default_args()
+        };
+        let rows = collect(&conn, &args, FIXED_NOW).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].command, "cmd-ws-a");
+    }
+
+    #[test]
+    fn collect_workspace_returns_asc_order() {
+        let conn = mem_conn();
+        seed_with_dir(
+            &conn,
+            s("first", "p", 1_000, 0, 100, "[]", "s1"),
+            "/d",
+            Some("ws-x"),
+        );
+        seed_with_dir(
+            &conn,
+            s("second", "p", 3_000, 0, 100, "[]", "s1"),
+            "/d",
+            Some("ws-x"),
+        );
+        seed_with_dir(
+            &conn,
+            s("third", "p", 2_000, 0, 100, "[]", "s1"),
+            "/d",
+            Some("ws-x"),
+        );
+        let args = ExportArgs {
+            workspace: Some("ws-x".into()),
+            ..default_args()
+        };
+        let rows = collect(&conn, &args, FIXED_NOW).unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].command, "first");
+        assert_eq!(rows[1].command, "third");
+        assert_eq!(rows[2].command, "second");
+    }
+
+    #[test]
+    fn render_replay_script_starts_with_shebang_and_set_e() {
+        let rows: Vec<ExportRow> = vec![];
+        let out = render_replay_script(&rows);
+        assert!(
+            out.starts_with("#!/usr/bin/env bash\n"),
+            "must start with shebang"
+        );
+        assert!(out.contains("set -e\n"), "must include set -e");
+    }
+
+    #[test]
+    fn render_replay_script_empty_rows_only_shebang_and_set_e() {
+        let rows: Vec<ExportRow> = vec![];
+        let out = render_replay_script(&rows);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "#!/usr/bin/env bash");
+        assert_eq!(lines[1], "set -e");
+    }
+
+    #[test]
+    fn render_replay_script_cd_before_each_command() {
+        let rows = vec![ExportRow {
+            command: "cargo build".into(),
+            directory: "/home/user/proj".into(),
+            timestamp: 1_000,
+            exit_code: 0,
+            duration_ms: 100,
+        }];
+        let out = render_replay_script(&rows);
+        assert!(
+            out.contains("cd '/home/user/proj'\n"),
+            "must emit cd line; got:\n{out}"
+        );
+        assert!(
+            out.contains("cargo build\n"),
+            "must emit command; got:\n{out}"
+        );
+        let cd_pos = out.find("cd '/home/user/proj'").unwrap();
+        let cmd_pos = out.find("cargo build").unwrap();
+        assert!(cd_pos < cmd_pos, "cd must come before the command");
+    }
+
+    #[test]
+    fn render_replay_script_escapes_single_quote_in_directory() {
+        let rows = vec![ExportRow {
+            command: "ls".into(),
+            directory: "/home/it's/project".into(),
+            timestamp: 1_000,
+            exit_code: 0,
+            duration_ms: 100,
+        }];
+        let out = render_replay_script(&rows);
+        assert!(
+            out.contains("cd '/home/it'\\''s/project'\n"),
+            "must escape single quote in dir; got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_replay_script_preserves_command_order() {
+        let rows = vec![
+            ExportRow {
+                command: "first_cmd".into(),
+                directory: "/a".into(),
+                timestamp: 1_000,
+                exit_code: 0,
+                duration_ms: 100,
+            },
+            ExportRow {
+                command: "second_cmd".into(),
+                directory: "/b".into(),
+                timestamp: 2_000,
+                exit_code: 0,
+                duration_ms: 100,
+            },
+        ];
+        let out = render_replay_script(&rows);
+        let first_pos = out.find("first_cmd").unwrap();
+        let second_pos = out.find("second_cmd").unwrap();
+        assert!(
+            first_pos < second_pos,
+            "first_cmd must appear before second_cmd"
+        );
+    }
+
+    #[test]
+    fn render_replay_script_two_rows_has_two_cd_lines() {
+        let rows = vec![
+            ExportRow {
+                command: "cmd-a".into(),
+                directory: "/dir-a".into(),
+                timestamp: 1_000,
+                exit_code: 0,
+                duration_ms: 100,
+            },
+            ExportRow {
+                command: "cmd-b".into(),
+                directory: "/dir-b".into(),
+                timestamp: 2_000,
+                exit_code: 0,
+                duration_ms: 100,
+            },
+        ];
+        let out = render_replay_script(&rows);
+        let cd_count = out.matches("cd '").count();
+        assert_eq!(
+            cd_count, 2,
+            "two rows must produce two cd lines; got:\n{out}"
+        );
+        assert!(out.contains("cd '/dir-a'\n"));
+        assert!(out.contains("cd '/dir-b'\n"));
     }
 }
