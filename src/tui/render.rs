@@ -98,54 +98,41 @@ pub fn tui_header(col: &Column) -> &'static str {
     }
 }
 
-fn col_fixed_width(col: &Column) -> Option<u16> {
+fn col_cap(col: &Column) -> u16 {
     match col {
-        Column::Timestamp => Some(9),
-        Column::Duration => Some(7),
-        Column::Exit => Some(4),
-        Column::Project => Some(14),
-        Column::Tags => Some(12),
-        Column::Directory => Some(20),
-        Column::Command => None,
+        Column::Timestamp => 9,
+        Column::Duration => 7,
+        Column::Exit => 4,
+        Column::Project => 20,
+        Column::Tags => 16,
+        Column::Directory => 30,
+        Column::Command => u16::MAX,
     }
 }
 
-fn tui_cell(col: &Column, row: &CommandRow, now: i64, flex_w: u16) -> Cell<'static> {
-    let dim = Style::default().fg(DIM_COLOR);
-    let cyan = Style::default().fg(ACCENT);
-    let blue = Style::default().fg(Color::Blue);
-
+fn col_text(col: &Column, row: &CommandRow, now: i64) -> String {
     match col {
-        Column::Timestamp => {
-            let rel = format_relative(row.timestamp, now);
-            Cell::from(Line::from(vec![Span::styled(rel, dim)]))
-        }
-        Column::Duration => {
-            let dur = format_duration(row.duration_ms);
-            Cell::from(Line::from(vec![Span::styled(dur, cyan)]))
-        }
-        Column::Exit => {
-            let (label, color) = exit_text(row.exit_code);
-            Cell::from(Line::from(vec![Span::styled(
-                label,
-                Style::default().fg(color),
-            )]))
-        }
-        Column::Project => {
-            let proj = truncate(&row.project, 14);
-            Cell::from(Line::from(vec![Span::styled(proj, blue)]))
-        }
-        Column::Command => {
-            let cmd = display_command(&row.command);
-            let cmd = truncate(&cmd, flex_w as usize);
-            Cell::from(Line::from(vec![Span::raw(cmd)]))
-        }
-        Column::Tags => Cell::from(Line::from(vec![Span::raw(row.tags.clone())])),
-        Column::Directory => {
-            let dir = truncate(&row.directory, 20);
-            Cell::from(Line::from(vec![Span::styled(dir, dim)]))
-        }
+        Column::Timestamp => format_relative(row.timestamp, now),
+        Column::Duration => format_duration(row.duration_ms),
+        Column::Exit => exit_text(row.exit_code).0.to_string(),
+        Column::Project => row.project.clone(),
+        Column::Command => display_command(&row.command),
+        Column::Tags => row.tags.clone(),
+        Column::Directory => row.directory.clone(),
     }
+}
+
+fn tui_cell(col: &Column, row: &CommandRow, now: i64, width: u16) -> Cell<'static> {
+    let text = truncate(&col_text(col, row, now), width as usize);
+    let style = match col {
+        Column::Timestamp => Style::default().fg(DIM_COLOR),
+        Column::Duration => Style::default().fg(ACCENT),
+        Column::Exit => Style::default().fg(exit_text(row.exit_code).1),
+        Column::Project => Style::default().fg(Color::Blue),
+        Column::Directory => Style::default().fg(DIM_COLOR),
+        Column::Command | Column::Tags => Style::default(),
+    };
+    Cell::from(Line::from(vec![Span::styled(text, style)]))
 }
 
 pub fn resolve_tui_columns(names: &[String]) -> Vec<Column> {
@@ -253,21 +240,6 @@ pub fn draw(
     let has_command_col = columns.iter().any(|c| matches!(c, Column::Command));
     let n_cols = columns.len();
     let gaps: u16 = n_cols.saturating_sub(1) as u16;
-    let fixed_total: u16 = columns.iter().filter_map(col_fixed_width).sum::<u16>();
-    let flex_w: u16 = inner_list_area.width.saturating_sub(fixed_total + gaps);
-
-    let widths: Vec<Constraint> = columns
-        .iter()
-        .enumerate()
-        .map(|(i, col)| {
-            let is_flex = col_fixed_width(col).is_none() || (!has_command_col && i == n_cols - 1);
-            if is_flex {
-                Constraint::Min(1)
-            } else {
-                Constraint::Length(col_fixed_width(col).unwrap_or(0))
-            }
-        })
-        .collect();
 
     let ordered: Vec<usize> = if is_bottom {
         app.filtered.iter().rev().copied().collect()
@@ -275,13 +247,62 @@ pub fn draw(
         app.filtered.to_vec()
     };
 
+    let flex_idx: Option<usize> = if has_command_col {
+        columns.iter().position(|c| matches!(c, Column::Command))
+    } else {
+        n_cols.checked_sub(1)
+    };
+
+    let content_w: Vec<u16> = columns
+        .iter()
+        .enumerate()
+        .map(|(i, col)| {
+            if Some(i) == flex_idx {
+                return 0;
+            }
+            let header_len = tui_header(col).chars().count() as u16;
+            let max_content = ordered
+                .iter()
+                .map(|&fi| col_text(col, &app.all_rows[fi], now).chars().count() as u16)
+                .max()
+                .unwrap_or(0);
+            header_len.max(max_content).min(col_cap(col))
+        })
+        .collect();
+
+    let fixed_total: u16 = content_w.iter().sum();
+    let flex_w: u16 = inner_list_area
+        .width
+        .saturating_sub(fixed_total + gaps)
+        .max(1);
+
+    let widths: Vec<Constraint> = columns
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            if Some(i) == flex_idx {
+                Constraint::Min(1)
+            } else {
+                Constraint::Length(content_w[i])
+            }
+        })
+        .collect();
+
     let rows: Vec<Row> = ordered
         .iter()
         .map(|&fi| {
             let row = &app.all_rows[fi];
             let cells: Vec<Cell> = columns
                 .iter()
-                .map(|col| tui_cell(col, row, now, flex_w))
+                .enumerate()
+                .map(|(i, col)| {
+                    let w = if Some(i) == flex_idx {
+                        flex_w
+                    } else {
+                        content_w[i]
+                    };
+                    tui_cell(col, row, now, w)
+                })
                 .collect();
             Row::new(cells)
         })
