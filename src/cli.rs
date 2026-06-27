@@ -24,6 +24,7 @@ pub enum Cmd {
     Untag(UntagArgs),
     Tags(TagsArgs),
     Prompt(PromptArgs),
+    Stats(StatsArgs),
     Doctor,
     #[command(hide = true)]
     NewSessionId,
@@ -141,6 +142,14 @@ pub struct TagsArgs {
 pub struct PromptArgs {
     #[arg(long)]
     pub framework: Option<String>,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct StatsArgs {
+    #[arg(short = 'p', long)]
+    pub project: Option<String>,
+    #[arg(long)]
+    pub since: Option<String>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -378,6 +387,15 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                 crate::prompt::detect_framework(&crate::prompt::probe_inputs())
             };
             print!("{}", crate::prompt::prompt_snippet(&framework));
+        }
+        Some(Cmd::Stats(args)) => {
+            let conn = crate::database::get_connection(None)?;
+            let stats_args = crate::stats::StatsArgs {
+                project: args.project,
+                since: args.since,
+            };
+            let stats = crate::stats::compute(&conn, &stats_args, now)?;
+            print!("{}", crate::stats::render(&stats));
         }
         Some(Cmd::Doctor) => {
             let shell_env = std::env::var("SHELL").ok();
