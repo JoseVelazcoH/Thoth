@@ -1,20 +1,21 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::tui::app::{Action, App, Tab};
+use crate::tui::app::{Action, App, Confirm, Mode, Tab, WsPane};
 
 fn handle_confirm_key(key: crossterm::event::KeyEvent, app: &mut App) -> Outcome {
     use crossterm::event::KeyCode;
     match key.code {
-        KeyCode::Char('y') | KeyCode::Char('Y') => {
-            let ws = app
-                .confirm
-                .as_ref()
-                .map(|c| c.workspace.clone())
-                .unwrap_or_default();
-            app.replay_workspace = Some(ws);
-            app.confirm = None;
-            Outcome::Exit
-        }
+        KeyCode::Char('y') | KeyCode::Char('Y') => match app.confirm.take() {
+            Some(Confirm::Replay(r)) => {
+                app.replay_workspace = Some(r.workspace);
+                Outcome::Exit
+            }
+            Some(Confirm::Delete(d)) => {
+                app.pending_delete = Some((d.id, d.origin));
+                Outcome::Continue
+            }
+            None => Outcome::Continue,
+        },
         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
             app.cancel_confirm();
             Outcome::Continue
@@ -34,10 +35,6 @@ pub fn handle_key(key: KeyEvent, app: &mut App) -> Outcome {
     }
 
     match key.code {
-        KeyCode::Esc => {
-            app.action = None;
-            return Outcome::Exit;
-        }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.action = None;
             return Outcome::Exit;
@@ -60,7 +57,18 @@ pub fn handle_key(key: KeyEvent, app: &mut App) -> Outcome {
 }
 
 fn handle_history_key(key: KeyEvent, app: &mut App) -> Outcome {
+    match app.mode {
+        Mode::Insert => handle_history_insert_key(key, app),
+        Mode::Normal => handle_history_normal_key(key, app),
+    }
+}
+
+fn handle_history_insert_key(key: KeyEvent, app: &mut App) -> Outcome {
     match key.code {
+        KeyCode::Esc => {
+            app.enter_normal_mode();
+            Outcome::Continue
+        }
         KeyCode::Enter => {
             if let Some(cmd) = app.selected_command() {
                 app.action = Some(Action::Run(cmd.to_string()));
@@ -103,13 +111,63 @@ fn handle_history_key(key: KeyEvent, app: &mut App) -> Outcome {
     }
 }
 
+fn handle_history_normal_key(key: KeyEvent, app: &mut App) -> Outcome {
+    match key.code {
+        KeyCode::Char('i') | KeyCode::Char('/') => {
+            app.enter_insert_mode();
+            Outcome::Continue
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            app.move_down();
+            Outcome::Continue
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.move_up();
+            Outcome::Continue
+        }
+        KeyCode::Char('d') => {
+            app.begin_delete_confirm_history();
+            Outcome::Continue
+        }
+        KeyCode::Enter => {
+            if let Some(cmd) = app.selected_command() {
+                app.action = Some(Action::Run(cmd.to_string()));
+            }
+            Outcome::Exit
+        }
+        KeyCode::Char('q') | KeyCode::Esc => {
+            app.action = None;
+            Outcome::Exit
+        }
+        _ => Outcome::Continue,
+    }
+}
+
 fn handle_ws_key(key: KeyEvent, app: &mut App) -> Outcome {
+    match key.code {
+        KeyCode::Tab => {
+            app.toggle_ws_pane();
+            return Outcome::Continue;
+        }
+        KeyCode::Esc => {
+            return Outcome::Exit;
+        }
+        _ => {}
+    }
+
+    match app.ws_pane {
+        WsPane::List => handle_ws_list_key(key, app),
+        WsPane::Commands => handle_ws_commands_key(key, app),
+    }
+}
+
+fn handle_ws_list_key(key: KeyEvent, app: &mut App) -> Outcome {
     match key.code {
         KeyCode::Enter => {
             app.begin_replay_confirm();
             Outcome::Continue
         }
-        KeyCode::Up => {
+        KeyCode::Up | KeyCode::Char('k') => {
             app.ws_move_up();
             Outcome::Continue
         }
@@ -117,7 +175,7 @@ fn handle_ws_key(key: KeyEvent, app: &mut App) -> Outcome {
             app.ws_move_up();
             Outcome::Continue
         }
-        KeyCode::Down => {
+        KeyCode::Down | KeyCode::Char('j') => {
             app.ws_move_down();
             Outcome::Continue
         }
@@ -129,9 +187,28 @@ fn handle_ws_key(key: KeyEvent, app: &mut App) -> Outcome {
     }
 }
 
+fn handle_ws_commands_key(key: KeyEvent, app: &mut App) -> Outcome {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.ws_cmd_move_up();
+            Outcome::Continue
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.ws_cmd_move_down();
+            Outcome::Continue
+        }
+        KeyCode::Char('d') => {
+            app.begin_delete_confirm_ws();
+            Outcome::Continue
+        }
+        _ => Outcome::Continue,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::app::{DeleteOrigin, Mode, WsPane};
     use crate::workspaces::WorkspaceRow;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
@@ -206,12 +283,21 @@ mod tests {
         app
     }
 
-    #[test]
-    fn esc_sets_no_action_and_exits() {
-        let mut app = app_with_rows();
-        let outcome = handle_key(key(KeyCode::Esc), &mut app);
-        assert!(app.action.is_none());
-        assert!(matches!(outcome, Outcome::Exit));
+    fn app_with_workspaces_and_commands() -> App {
+        let mut app = app_with_workspaces();
+        app.ws_commands = vec![crate::search::CommandRow {
+            id: 10,
+            command: "git status".into(),
+            directory: "/tmp".into(),
+            project: "p".into(),
+            session_id: "s1".into(),
+            timestamp: 1000,
+            exit_code: 0,
+            duration_ms: 100,
+            tags: "[]".into(),
+            workspace: Some("ws-new".into()),
+        }];
+        app
     }
 
     #[test]
@@ -223,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn enter_sets_run_action_and_exits() {
+    fn history_insert_enter_sets_run_action_and_exits() {
         let mut app = app_with_rows();
         let outcome = handle_key(key(KeyCode::Enter), &mut app);
         assert!(matches!(outcome, Outcome::Exit));
@@ -231,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn tab_sets_edit_action_and_exits() {
+    fn history_insert_tab_sets_edit_action_and_exits() {
         let mut app = app_with_rows();
         let outcome = handle_key(key(KeyCode::Tab), &mut app);
         assert!(matches!(outcome, Outcome::Exit));
@@ -239,63 +325,126 @@ mod tests {
     }
 
     #[test]
-    fn up_arrow_moves_to_older_command() {
+    fn history_insert_esc_enters_normal_mode_no_exit() {
+        let mut app = app_with_rows();
+        assert_eq!(app.mode, Mode::Insert);
+        let outcome = handle_key(key(KeyCode::Esc), &mut app);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn history_normal_i_enters_insert_mode() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        let outcome = handle_key(key(KeyCode::Char('i')), &mut app);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert_eq!(app.mode, Mode::Insert);
+    }
+
+    #[test]
+    fn history_normal_slash_enters_insert_mode() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        let outcome = handle_key(key(KeyCode::Char('/')), &mut app);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert_eq!(app.mode, Mode::Insert);
+    }
+
+    #[test]
+    fn history_normal_j_moves_down() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        app.selected = 1;
+        handle_key(key(KeyCode::Char('j')), &mut app);
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn history_normal_k_moves_up() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        app.selected = 0;
+        handle_key(key(KeyCode::Char('k')), &mut app);
+        assert_eq!(app.selected, 1);
+    }
+
+    #[test]
+    fn history_normal_d_opens_delete_confirm() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        let outcome = handle_key(key(KeyCode::Char('d')), &mut app);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert!(app.confirm.is_some());
+        assert!(matches!(
+            app.confirm.as_ref().unwrap(),
+            Confirm::Delete(d) if matches!(d.origin, DeleteOrigin::History)
+        ));
+    }
+
+    #[test]
+    fn history_normal_enter_runs_and_exits() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        let outcome = handle_key(key(KeyCode::Enter), &mut app);
+        assert!(matches!(outcome, Outcome::Exit));
+        assert!(matches!(&app.action, Some(Action::Run(_))));
+    }
+
+    #[test]
+    fn history_normal_q_exits() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        let outcome = handle_key(key(KeyCode::Char('q')), &mut app);
+        assert!(matches!(outcome, Outcome::Exit));
+    }
+
+    #[test]
+    fn history_normal_esc_exits() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        let outcome = handle_key(key(KeyCode::Esc), &mut app);
+        assert!(matches!(outcome, Outcome::Exit));
+    }
+
+    #[test]
+    fn history_insert_typing_still_filters_regression() {
+        let mut app = app_with_rows();
+        assert_eq!(app.mode, Mode::Insert);
+        handle_key(key(KeyCode::Char('g')), &mut app);
+        assert_eq!(app.query, "g");
+    }
+
+    #[test]
+    fn history_insert_up_arrow_moves_to_older_command() {
         let mut app = app_with_rows();
         app.selected = 0;
-        let cmd_before = app.selected_command().map(str::to_string);
         handle_key(key(KeyCode::Up), &mut app);
-        let cmd_after = app.selected_command().map(str::to_string);
-        assert_ne!(cmd_before, cmd_after, "Up must change the selected command");
-        assert_eq!(
-            app.selected, 1,
-            "Up increases selected index toward older row"
-        );
+        assert_eq!(app.selected, 1);
     }
 
     #[test]
-    fn down_arrow_moves_to_newer_command() {
+    fn history_insert_down_arrow_moves_to_newer_command() {
         let mut app = app_with_rows();
         app.selected = 1;
-        let cmd_before = app.selected_command().map(str::to_string);
         handle_key(key(KeyCode::Down), &mut app);
-        let cmd_after = app.selected_command().map(str::to_string);
-        assert_ne!(
-            cmd_before, cmd_after,
-            "Down must change the selected command"
-        );
-        assert_eq!(
-            app.selected, 0,
-            "Down decreases selected index toward newer row"
-        );
+        assert_eq!(app.selected, 0);
     }
 
     #[test]
-    fn ctrl_p_moves_to_older_command() {
+    fn history_ctrl_p_moves_up() {
         let mut app = app_with_rows();
         app.selected = 0;
         handle_key(ctrl(KeyCode::Char('p')), &mut app);
-        assert_eq!(
-            app.selected, 1,
-            "Ctrl-P increases selected index toward older row"
-        );
+        assert_eq!(app.selected, 1);
     }
 
     #[test]
-    fn ctrl_n_moves_to_newer_command() {
+    fn history_ctrl_n_moves_down() {
         let mut app = app_with_rows();
         app.selected = 1;
         handle_key(ctrl(KeyCode::Char('n')), &mut app);
-        assert_eq!(
-            app.selected, 0,
-            "Ctrl-N decreases selected index toward newer row"
-        );
-    }
-
-    #[test]
-    fn printable_char_appends_to_query() {
-        let mut app = app_with_rows();
-        handle_key(key(KeyCode::Char('g')), &mut app);
-        assert_eq!(app.query, "g");
+        assert_eq!(app.selected, 0);
     }
 
     #[test]
@@ -413,24 +562,11 @@ mod tests {
     }
 
     #[test]
-    fn ws_enter_is_continue_not_exit() {
-        let mut app = app_with_workspaces();
+    fn ws_enter_opens_confirm_modal() {
+        let mut app = app_with_workspaces_and_commands();
         let outcome = handle_key(key(KeyCode::Enter), &mut app);
-        assert!(
-            matches!(outcome, Outcome::Continue),
-            "Workspaces Enter must be Continue (no-op in PR2)"
-        );
-    }
-
-    #[test]
-    fn ws_enter_does_not_change_tab_or_filters() {
-        let mut app = app_with_workspaces();
-        handle_key(key(KeyCode::Enter), &mut app);
-        assert_eq!(app.tab, Tab::Workspaces, "Enter must not change tab");
-        assert!(
-            app.filters.session.is_none(),
-            "Enter must not set session filter"
-        );
+        assert!(matches!(outcome, Outcome::Continue));
+        assert!(app.confirm.is_some(), "Enter must open confirm modal");
     }
 
     #[test]
@@ -468,33 +604,8 @@ mod tests {
         assert_eq!(app.query, "g");
     }
 
-    fn app_with_workspaces_and_commands() -> App {
-        let mut app = app_with_workspaces();
-        app.ws_commands = vec![crate::search::CommandRow {
-            id: 10,
-            command: "git status".into(),
-            directory: "/tmp".into(),
-            project: "p".into(),
-            session_id: "s1".into(),
-            timestamp: 1000,
-            exit_code: 0,
-            duration_ms: 100,
-            tags: "[]".into(),
-            workspace: Some("ws-new".into()),
-        }];
-        app
-    }
-
     #[test]
-    fn ws_enter_opens_confirm_modal() {
-        let mut app = app_with_workspaces_and_commands();
-        let outcome = handle_key(key(KeyCode::Enter), &mut app);
-        assert!(matches!(outcome, Outcome::Continue));
-        assert!(app.confirm.is_some(), "Enter must open confirm modal");
-    }
-
-    #[test]
-    fn confirm_y_sets_replay_workspace_clears_confirm_and_exits() {
+    fn confirm_replay_y_sets_replay_workspace_clears_confirm_and_exits() {
         let mut app = app_with_workspaces_and_commands();
         handle_key(key(KeyCode::Enter), &mut app);
         assert!(app.confirm.is_some());
@@ -505,7 +616,7 @@ mod tests {
     }
 
     #[test]
-    fn confirm_n_cancels_and_continues() {
+    fn confirm_replay_n_cancels_and_continues() {
         let mut app = app_with_workspaces_and_commands();
         handle_key(key(KeyCode::Enter), &mut app);
         let outcome = handle_key(key(KeyCode::Char('n')), &mut app);
@@ -515,12 +626,75 @@ mod tests {
     }
 
     #[test]
-    fn confirm_esc_cancels_and_continues() {
+    fn confirm_replay_esc_cancels_and_continues() {
         let mut app = app_with_workspaces_and_commands();
         handle_key(key(KeyCode::Enter), &mut app);
         let outcome = handle_key(key(KeyCode::Esc), &mut app);
         assert!(matches!(outcome, Outcome::Continue));
         assert!(app.confirm.is_none());
+    }
+
+    #[test]
+    fn delete_confirm_y_sets_pending_delete_continue_not_exit() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        handle_key(key(KeyCode::Char('d')), &mut app);
+        assert!(app.confirm.is_some());
+        let expected_id = if let Some(Confirm::Delete(d)) = app.confirm.as_ref() {
+            d.id
+        } else {
+            panic!("expected Delete confirm");
+        };
+        let outcome = handle_key(key(KeyCode::Char('y')), &mut app);
+        assert!(
+            matches!(outcome, Outcome::Continue),
+            "delete y must Continue, not Exit"
+        );
+        assert!(app.confirm.is_none());
+        assert!(
+            matches!(app.pending_delete, Some((id, DeleteOrigin::History)) if id == expected_id)
+        );
+    }
+
+    #[test]
+    fn delete_confirm_n_cancels_and_continues() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        handle_key(key(KeyCode::Char('d')), &mut app);
+        let outcome = handle_key(key(KeyCode::Char('n')), &mut app);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert!(app.confirm.is_none());
+        assert!(app.pending_delete.is_none());
+    }
+
+    #[test]
+    fn ws_tab_toggles_pane() {
+        let mut app = app_with_workspaces();
+        assert_eq!(app.ws_pane, WsPane::List);
+        handle_key(key(KeyCode::Tab), &mut app);
+        assert_eq!(app.ws_pane, WsPane::Commands);
+        handle_key(key(KeyCode::Tab), &mut app);
+        assert_eq!(app.ws_pane, WsPane::List);
+    }
+
+    #[test]
+    fn ws_commands_pane_d_opens_delete_confirm_with_ws_command_id() {
+        let mut app = app_with_workspaces_and_commands();
+        app.ws_pane = WsPane::Commands;
+        app.ws_cmd_selected = 0;
+        let expected_id = app.ws_commands[0].id;
+        let outcome = handle_key(key(KeyCode::Char('d')), &mut app);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert!(
+            matches!(app.confirm.as_ref(), Some(Confirm::Delete(d)) if d.id == expected_id && matches!(d.origin, DeleteOrigin::Workspace))
+        );
+    }
+
+    #[test]
+    fn ws_esc_exits() {
+        let mut app = app_with_workspaces();
+        let outcome = handle_key(key(KeyCode::Esc), &mut app);
+        assert!(matches!(outcome, Outcome::Exit));
     }
 
     #[test]
@@ -559,5 +733,36 @@ mod tests {
         let outcome = handle_key(key(KeyCode::Enter), &mut app);
         assert!(matches!(outcome, Outcome::Exit));
         assert!(matches!(&app.action, Some(Action::Run(_))));
+    }
+
+    #[test]
+    fn ws_enter_is_continue_not_exit() {
+        let mut app = app_with_workspaces();
+        let outcome = handle_key(key(KeyCode::Enter), &mut app);
+        assert!(
+            matches!(outcome, Outcome::Continue),
+            "Workspaces Enter must be Continue"
+        );
+    }
+
+    #[test]
+    fn ws_enter_does_not_change_tab_or_filters() {
+        let mut app = app_with_workspaces();
+        handle_key(key(KeyCode::Enter), &mut app);
+        assert_eq!(app.tab, Tab::Workspaces, "Enter must not change tab");
+        assert!(
+            app.filters.session.is_none(),
+            "Enter must not set session filter"
+        );
+    }
+
+    #[test]
+    fn replay_confirm_is_still_replay_type() {
+        let mut app = app_with_workspaces_and_commands();
+        handle_key(key(KeyCode::Enter), &mut app);
+        assert!(
+            matches!(app.confirm.as_ref(), Some(Confirm::Replay(_))),
+            "Enter in Workspaces List must open Replay confirm, not Delete"
+        );
     }
 }

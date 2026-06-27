@@ -18,7 +18,7 @@ use rusqlite::Connection;
 use crate::error::ThothError;
 use crate::export::{self, ExportArgs};
 use crate::search::Column;
-use crate::tui::app::{Action, App};
+use crate::tui::app::{Action, App, DeleteOrigin};
 use crate::tui::event::{handle_key, Outcome};
 use crate::tui::render::format_action_line;
 
@@ -91,6 +91,27 @@ pub fn run(
                 match handle_key(key, &mut app) {
                     Outcome::Exit => break,
                     Outcome::Continue => {
+                        if let Some((id, origin)) = app.pending_delete.take() {
+                            crate::forget::delete_targets(conn, &[id])
+                                .map_err(|e| ThothError::Tui(format!("delete failed: {e}")))?;
+                            match origin {
+                                DeleteOrigin::History => {
+                                    app.reload(conn, now).map_err(|e| {
+                                        ThothError::Tui(format!("history reload failed: {e}"))
+                                    })?;
+                                }
+                                DeleteOrigin::Workspace => {
+                                    app.reload_workspaces(conn).map_err(|e| {
+                                        ThothError::Tui(format!("workspace reload failed: {e}"))
+                                    })?;
+                                    app.reload_ws_commands(conn).map_err(|e| {
+                                        ThothError::Tui(format!(
+                                            "workspace commands reload failed: {e}"
+                                        ))
+                                    })?;
+                                }
+                            }
+                        }
                         if app.needs_ws_reload {
                             app.reload_workspaces(conn).map_err(|e| {
                                 ThothError::Tui(format!("workspace reload failed: {e}"))
