@@ -6,6 +6,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::search::{Column, CommandRow};
 use crate::tui::app::App;
 use crate::tui::time::format_relative;
 
@@ -85,11 +86,96 @@ fn filter_chips(app: &App) -> String {
     parts.join(" ")
 }
 
+pub fn tui_header(col: &Column) -> &'static str {
+    match col {
+        Column::Timestamp => "time",
+        Column::Duration => "dur",
+        Column::Exit => "exit",
+        Column::Project => "project",
+        Column::Command => "command",
+        Column::Tags => "tags",
+        Column::Directory => "dir",
+    }
+}
+
+fn col_fixed_width(col: &Column) -> Option<u16> {
+    match col {
+        Column::Timestamp => Some(9),
+        Column::Duration => Some(7),
+        Column::Exit => Some(4),
+        Column::Project => Some(14),
+        Column::Tags => Some(12),
+        Column::Directory => Some(20),
+        Column::Command => None,
+    }
+}
+
+fn tui_cell(col: &Column, row: &CommandRow, now: i64, flex_w: u16) -> Cell<'static> {
+    let dim = Style::default().fg(DIM_COLOR);
+    let cyan = Style::default().fg(ACCENT);
+    let blue = Style::default().fg(Color::Blue);
+
+    match col {
+        Column::Timestamp => {
+            let rel = format_relative(row.timestamp, now);
+            Cell::from(Line::from(vec![Span::styled(rel, dim)]))
+        }
+        Column::Duration => {
+            let dur = format_duration(row.duration_ms);
+            Cell::from(Line::from(vec![Span::styled(dur, cyan)]))
+        }
+        Column::Exit => {
+            let (label, color) = exit_text(row.exit_code);
+            Cell::from(Line::from(vec![Span::styled(
+                label,
+                Style::default().fg(color),
+            )]))
+        }
+        Column::Project => {
+            let proj = truncate(&row.project, 14);
+            Cell::from(Line::from(vec![Span::styled(proj, blue)]))
+        }
+        Column::Command => {
+            let cmd = display_command(&row.command);
+            let cmd = truncate(&cmd, flex_w as usize);
+            Cell::from(Line::from(vec![Span::raw(cmd)]))
+        }
+        Column::Tags => Cell::from(Line::from(vec![Span::raw(row.tags.clone())])),
+        Column::Directory => {
+            let dir = truncate(&row.directory, 20);
+            Cell::from(Line::from(vec![Span::styled(dir, dim)]))
+        }
+    }
+}
+
+pub fn resolve_tui_columns(names: &[String]) -> Vec<Column> {
+    use crate::config::default_tui_columns;
+
+    if names.is_empty() {
+        eprintln!("thoth: unknown TUI column(s) in config, using defaults");
+        return resolve_tui_columns(&default_tui_columns());
+    }
+
+    let resolved: Vec<Option<Column>> = names.iter().map(|n| Column::from_name(n)).collect();
+    if resolved.iter().any(|c| c.is_none()) {
+        eprintln!("thoth: unknown TUI column(s) in config, using defaults");
+        return resolve_tui_columns(&default_tui_columns());
+    }
+    resolved.into_iter().flatten().collect()
+}
+
 const ACCENT: Color = Color::Cyan;
 const DIM_COLOR: Color = Color::DarkGray;
 const BORDER_COLOR: Color = Color::DarkGray;
 
-pub fn draw(frame: &mut Frame, app: &App, now: i64, is_bottom: bool, table_state: &mut TableState) {
+pub fn draw(
+    frame: &mut Frame,
+    app: &App,
+    now: i64,
+    is_bottom: bool,
+    columns: &[Column],
+    table_state: &mut TableState,
+) {
     let area = frame.area();
 
     let chunks = Layout::vertical([
@@ -164,17 +250,24 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64, is_bottom: bool, table_state
     let inner_list_area = list_block.inner(list_area);
     frame.render_widget(list_block, list_area);
 
-    let time_w: u16 = 9;
-    let dur_w: u16 = 7;
-    let exit_w: u16 = 4;
-    let proj_w: u16 = 14;
-    let gaps: u16 = 4;
-    let fixed: u16 = time_w + dur_w + exit_w + proj_w + gaps;
-    let cmd_w: u16 = inner_list_area.width.saturating_sub(fixed);
+    let has_command_col = columns.iter().any(|c| matches!(c, Column::Command));
+    let n_cols = columns.len();
+    let gaps: u16 = n_cols.saturating_sub(1) as u16;
+    let fixed_total: u16 = columns.iter().filter_map(col_fixed_width).sum::<u16>();
+    let flex_w: u16 = inner_list_area.width.saturating_sub(fixed_total + gaps);
 
-    let dim = Style::default().fg(DIM_COLOR);
-    let cyan = Style::default().fg(ACCENT);
-    let blue = Style::default().fg(Color::Blue);
+    let widths: Vec<Constraint> = columns
+        .iter()
+        .enumerate()
+        .map(|(i, col)| {
+            let is_flex = col_fixed_width(col).is_none() || (!has_command_col && i == n_cols - 1);
+            if is_flex {
+                Constraint::Min(1)
+            } else {
+                Constraint::Length(col_fixed_width(col).unwrap_or(0))
+            }
+        })
+        .collect();
 
     let ordered: Vec<usize> = if is_bottom {
         app.filtered.iter().rev().copied().collect()
@@ -186,39 +279,30 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64, is_bottom: bool, table_state
         .iter()
         .map(|&fi| {
             let row = &app.all_rows[fi];
-            let rel = format_relative(row.timestamp, now);
-            let dur = format_duration(row.duration_ms);
-            let (exit_label, exit_color) = exit_text(row.exit_code);
-            let proj = truncate(&row.project, proj_w as usize);
-            let cmd = display_command(&row.command);
-            let cmd = truncate(&cmd, cmd_w as usize);
-
-            let time_cell = Cell::from(Line::from(vec![Span::styled(rel, dim)]));
-            let dur_cell = Cell::from(Line::from(vec![Span::styled(dur, cyan)]));
-            let exit_cell = Cell::from(Line::from(vec![Span::styled(
-                exit_label,
-                Style::default().fg(exit_color),
-            )]));
-            let proj_cell = Cell::from(Line::from(vec![Span::styled(proj, blue)]));
-            let cmd_cell = Cell::from(Line::from(vec![Span::raw(cmd)]));
-
-            Row::new([time_cell, dur_cell, exit_cell, proj_cell, cmd_cell])
+            let cells: Vec<Cell> = columns
+                .iter()
+                .map(|col| tui_cell(col, row, now, flex_w))
+                .collect();
+            Row::new(cells)
         })
         .collect();
 
-    let widths = [
-        Constraint::Length(time_w),
-        Constraint::Length(dur_w),
-        Constraint::Length(exit_w),
-        Constraint::Length(proj_w),
-        Constraint::Min(1),
-    ];
+    let table_header_style = Style::default()
+        .fg(DIM_COLOR)
+        .add_modifier(Modifier::DIM)
+        .add_modifier(Modifier::BOLD);
+    let header_cells: Vec<Cell> = columns
+        .iter()
+        .map(|col| Cell::from(tui_header(col)).style(table_header_style))
+        .collect();
+    let table_header = Row::new(header_cells);
 
     let highlight_style = Style::default()
         .add_modifier(Modifier::REVERSED)
         .add_modifier(Modifier::BOLD);
 
     let table = Table::new(rows, widths)
+        .header(table_header)
         .block(Block::default())
         .row_highlight_style(highlight_style);
 
@@ -261,7 +345,7 @@ pub fn format_action_line(action: Option<&crate::tui::app::Action>) -> Option<St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::search::CommandRow;
+    use crate::config::default_tui_columns;
     use crate::tui::app::{Action, App};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -283,12 +367,17 @@ mod tests {
         }
     }
 
+    fn default_cols() -> Vec<Column> {
+        resolve_tui_columns(&default_tui_columns())
+    }
+
     fn render_app(app: &App) -> String {
         let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut ts = TableState::default();
+        let cols = default_cols();
         terminal
-            .draw(|f| draw(f, app, TEST_NOW, true, &mut ts))
+            .draw(|f| draw(f, app, TEST_NOW, true, &cols, &mut ts))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         let mut lines: Vec<String> = Vec::new();
@@ -395,8 +484,9 @@ mod tests {
         let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut ts = TableState::default();
+        let cols = default_cols();
         terminal
-            .draw(|f| draw(f, &app, TEST_NOW, true, &mut ts))
+            .draw(|f| draw(f, &app, TEST_NOW, true, &cols, &mut ts))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
 
@@ -494,8 +584,9 @@ mod tests {
         let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut ts = TableState::default();
+        let cols = default_cols();
         terminal
-            .draw(|f| draw(f, &app, TEST_NOW, true, &mut ts))
+            .draw(|f| draw(f, &app, TEST_NOW, true, &cols, &mut ts))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
 
@@ -553,8 +644,9 @@ mod tests {
         let backend = TestBackend::new(SMALL_WIDTH, SMALL_HEIGHT);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut ts = TableState::default();
+        let cols = default_cols();
         terminal
-            .draw(|f| draw(f, &app, TEST_NOW, true, &mut ts))
+            .draw(|f| draw(f, &app, TEST_NOW, true, &cols, &mut ts))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
 
@@ -694,9 +786,12 @@ mod tests {
         height: u16,
         ts: &mut TableState,
     ) -> (String, ratatui::buffer::Buffer) {
+        let cols = default_cols();
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, app, TEST_NOW, true, ts)).unwrap();
+        terminal
+            .draw(|f| draw(f, app, TEST_NOW, true, &cols, ts))
+            .unwrap();
         let buf = terminal.backend().buffer().clone();
         let mut lines: Vec<String> = Vec::new();
         for row in 0..height {
@@ -738,11 +833,12 @@ mod tests {
     #[test]
     fn top_orientation_renders_newest_above_oldest() {
         let app = app_bottom_anchored();
+        let cols = default_cols();
         let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut ts = TableState::default();
         terminal
-            .draw(|f| draw(f, &app, TEST_NOW, false, &mut ts))
+            .draw(|f| draw(f, &app, TEST_NOW, false, &cols, &mut ts))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         let newest_y = row_y_of("newest-cmd", &buf, TEST_WIDTH, TEST_HEIGHT)
@@ -909,7 +1005,7 @@ mod tests {
         use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
         const W: u16 = 80;
-        const H: u16 = 9;
+        const H: u16 = 12;
 
         let mut app = App::new();
         app.all_rows = (0..12)
@@ -996,7 +1092,7 @@ mod tests {
         use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
         const W: u16 = 80;
-        const H: u16 = 9;
+        const H: u16 = 12;
 
         let mut app = App::new();
         app.all_rows = (0..12)
@@ -1066,7 +1162,7 @@ mod tests {
         use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
         const W: u16 = 80;
-        const H: u16 = 9;
+        const H: u16 = 12;
 
         let mut app = App::new();
         app.all_rows = (0..12)
@@ -1103,5 +1199,181 @@ mod tests {
             highlighted_end.is_some(),
             "selected row must be highlighted and visible after scrolling"
         );
+    }
+
+    #[test]
+    fn table_header_shows_default_column_labels() {
+        let app = app_with_rows();
+        let text = render_app(&app);
+        assert!(
+            text.contains("time"),
+            "table header must contain label 'time'; got:\n{text}"
+        );
+        assert!(
+            text.contains("dur"),
+            "table header must contain label 'dur'; got:\n{text}"
+        );
+        assert!(
+            text.contains("exit"),
+            "table header must contain label 'exit'; got:\n{text}"
+        );
+        assert!(
+            text.contains("project"),
+            "table header must contain label 'project'; got:\n{text}"
+        );
+        assert!(
+            text.contains("command"),
+            "table header must contain label 'command'; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn table_header_not_reversed() {
+        let app = app_with_rows();
+        let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ts = TableState::default();
+        let cols = default_cols();
+        terminal
+            .draw(|f| draw(f, &app, TEST_NOW, true, &cols, &mut ts))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        let header_row_y = 2u16;
+        let reversed_count = (0..TEST_WIDTH)
+            .filter(|&x| {
+                buf[(x, header_row_y)]
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::REVERSED)
+            })
+            .count();
+        assert_eq!(
+            reversed_count, 0,
+            "table header row must have zero REVERSED cells; found {reversed_count}"
+        );
+    }
+
+    #[test]
+    fn reduced_columns_only_show_selected_headers() {
+        let mut app = App::new();
+        app.all_rows = vec![make_row("my-cmd", TEST_NOW - 10, 1, "proj")];
+        app.recompute();
+
+        let cols = resolve_tui_columns(&["exit".to_string(), "command".to_string()]);
+        let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ts = TableState::default();
+        terminal
+            .draw(|f| draw(f, &app, TEST_NOW, true, &cols, &mut ts))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut lines: Vec<String> = Vec::new();
+        for row in 0..TEST_HEIGHT {
+            let mut line = String::new();
+            for col in 0..TEST_WIDTH {
+                line.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+            }
+            lines.push(line.trim_end().to_string());
+        }
+        let text = lines.join("\n");
+
+        assert!(
+            text.contains("exit"),
+            "reduced cols must show 'exit' header; got:\n{text}"
+        );
+        assert!(
+            text.contains("command"),
+            "reduced cols must show 'command' header; got:\n{text}"
+        );
+        assert!(
+            !text.contains("time"),
+            "reduced cols must NOT show 'time' header; got:\n{text}"
+        );
+        assert!(
+            !text.contains("dur"),
+            "reduced cols must NOT show 'dur' header; got:\n{text}"
+        );
+        assert!(
+            text.contains("my-cmd"),
+            "command cell must render; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn resolve_tui_columns_all_valid_returns_them() {
+        let cols = resolve_tui_columns(&["exit".to_string(), "command".to_string()]);
+        assert_eq!(cols.len(), 2);
+        assert!(matches!(cols[0], Column::Exit));
+        assert!(matches!(cols[1], Column::Command));
+    }
+
+    #[test]
+    fn resolve_tui_columns_unknown_name_returns_defaults() {
+        let cols = resolve_tui_columns(&["exit".to_string(), "bogus".to_string()]);
+        let defaults = resolve_tui_columns(&default_tui_columns());
+        assert_eq!(cols.len(), defaults.len());
+    }
+
+    #[test]
+    fn resolve_tui_columns_empty_returns_defaults() {
+        let cols = resolve_tui_columns(&[]);
+        let defaults = resolve_tui_columns(&default_tui_columns());
+        assert_eq!(cols.len(), defaults.len());
+    }
+
+    #[test]
+    fn dump_reduced_columns_buffer() {
+        let mut app = App::new();
+        app.all_rows = vec![
+            make_row("git status", TEST_NOW - 10, 0, "proj"),
+            make_row("cargo build", TEST_NOW - 60, 1, "proj"),
+            make_row("docker run nginx", TEST_NOW - 300, 0, "proj"),
+        ];
+        app.recompute();
+
+        let cols_default = default_cols();
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ts = TableState::default();
+        terminal
+            .draw(|f| draw(f, &app, TEST_NOW, true, &cols_default, &mut ts))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut lines: Vec<String> = Vec::new();
+        for row in 0..10u16 {
+            let mut line = String::new();
+            for col in 0..80u16 {
+                line.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+            }
+            lines.push(line.trim_end().to_string());
+        }
+        println!("=== DEFAULT COLUMNS (80x10) ===");
+        println!("{}", lines.join("\n"));
+
+        let cols_reduced = resolve_tui_columns(&["exit".to_string(), "command".to_string()]);
+        let backend2 = TestBackend::new(80, 10);
+        let mut terminal2 = Terminal::new(backend2).unwrap();
+        let mut ts2 = TableState::default();
+        terminal2
+            .draw(|f| draw(f, &app, TEST_NOW, true, &cols_reduced, &mut ts2))
+            .unwrap();
+        let buf2 = terminal2.backend().buffer().clone();
+        let mut lines2: Vec<String> = Vec::new();
+        for row in 0..10u16 {
+            let mut line = String::new();
+            for col in 0..80u16 {
+                line.push(buf2[(col, row)].symbol().chars().next().unwrap_or(' '));
+            }
+            lines2.push(line.trim_end().to_string());
+        }
+        println!("\n=== REDUCED COLUMNS [exit, command] (80x10) ===");
+        println!("{}", lines2.join("\n"));
+
+        assert!(lines.iter().any(|l| l.contains("time")));
+        assert!(lines2
+            .iter()
+            .any(|l| l.contains("exit") && l.contains("command")));
+        assert!(lines2.iter().all(|l| !l.contains("time")));
     }
 }

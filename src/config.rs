@@ -19,6 +19,8 @@ gap_minutes = 30
 [tui]
 # Interactive search panel position: "bottom" or "top".
 orientation = "bottom"
+# Columns to show in the interactive panel, in order. Available: timestamp, project, tags, exit, duration, directory, command
+# columns = ["timestamp", "duration", "exit", "project", "command"]
 
 [search]
 # Default maximum number of results for `tth search`.
@@ -64,14 +66,27 @@ impl Default for Session {
 #[serde(default)]
 pub struct Tui {
     pub orientation: Orientation,
+    #[serde(default = "default_tui_columns")]
+    pub columns: Vec<String>,
 }
 
 impl Default for Tui {
     fn default() -> Self {
         Self {
             orientation: Orientation::Bottom,
+            columns: default_tui_columns(),
         }
     }
+}
+
+pub fn default_tui_columns() -> Vec<String> {
+    vec![
+        "timestamp".into(),
+        "duration".into(),
+        "exit".into(),
+        "project".into(),
+        "command".into(),
+    ]
 }
 
 pub fn default_search_columns() -> Vec<String> {
@@ -433,6 +448,21 @@ mod tests {
     fn orientation_is_bottom_helper() {
         assert!(Orientation::Bottom.is_bottom());
         assert!(!Orientation::Top.is_bottom());
+    }
+
+    #[test]
+    fn tui_default_columns_are_five() {
+        let tui = Tui::default();
+        assert_eq!(
+            tui.columns,
+            vec!["timestamp", "duration", "exit", "project", "command"]
+        );
+    }
+
+    #[test]
+    fn parse_tui_columns_custom() {
+        let cfg = parse("[tui]\ncolumns = [\"exit\", \"command\"]").unwrap();
+        assert_eq!(cfg.tui.columns, vec!["exit", "command"]);
     }
 
     #[test]
