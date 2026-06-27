@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table},
+    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState},
     Frame,
 };
 
@@ -172,51 +172,21 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
     let fixed: u16 = time_w + dur_w + exit_w + proj_w + gaps;
     let cmd_w: u16 = inner_list_area.width.saturating_sub(fixed);
 
-    let height = inner_list_area.height as usize;
-
-    let visible: Vec<usize> = if app.filtered.is_empty() {
-        vec![]
-    } else {
-        let total = app.filtered.len();
-        let scroll = app.scroll.min(total.saturating_sub(1));
-        let end = (scroll + height).min(total);
-        (scroll..end).collect()
-    };
-
-    let selected_in_visible = if visible.is_empty() {
-        None
-    } else {
-        let scroll = app.scroll.min(app.filtered.len().saturating_sub(1));
-        if app.selected >= scroll && app.selected < scroll + visible.len() {
-            Some(app.selected - scroll)
-        } else {
-            None
-        }
-    };
-
     let dim = Style::default().fg(DIM_COLOR);
     let cyan = Style::default().fg(ACCENT);
     let blue = Style::default().fg(Color::Blue);
 
-    let rows: Vec<Row> = visible
+    let rows: Vec<Row> = app
+        .filtered
         .iter()
-        .enumerate()
-        .map(|(vi, &fi)| {
-            let row = &app.all_rows[app.filtered[fi]];
+        .map(|&fi| {
+            let row = &app.all_rows[fi];
             let rel = format_relative(row.timestamp, now);
             let dur = format_duration(row.duration_ms);
             let (exit_label, exit_color) = exit_text(row.exit_code);
             let proj = truncate(&row.project, proj_w as usize);
             let cmd = display_command(&row.command);
             let cmd = truncate(&cmd, cmd_w as usize);
-
-            let row_style = if Some(vi) == selected_in_visible {
-                Style::default()
-                    .add_modifier(Modifier::REVERSED)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
 
             let time_cell = Cell::from(Line::from(vec![Span::styled(rel, dim)]));
             let dur_cell = Cell::from(Line::from(vec![Span::styled(dur, cyan)]));
@@ -227,7 +197,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
             let proj_cell = Cell::from(Line::from(vec![Span::styled(proj, blue)]));
             let cmd_cell = Cell::from(Line::from(vec![Span::raw(cmd)]));
 
-            Row::new([time_cell, dur_cell, exit_cell, proj_cell, cmd_cell]).style(row_style)
+            Row::new([time_cell, dur_cell, exit_cell, proj_cell, cmd_cell])
         })
         .collect();
 
@@ -239,8 +209,21 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
         Constraint::Min(1),
     ];
 
-    let table = Table::new(rows, widths).block(Block::default());
-    frame.render_widget(table, inner_list_area);
+    let highlight_style = Style::default()
+        .add_modifier(Modifier::REVERSED)
+        .add_modifier(Modifier::BOLD);
+
+    let table = Table::new(rows, widths)
+        .block(Block::default())
+        .row_highlight_style(highlight_style);
+
+    let selected = if app.filtered.is_empty() {
+        None
+    } else {
+        Some(app.selected)
+    };
+    let mut table_state = TableState::default().with_selected(selected);
+    frame.render_stateful_widget(table, inner_list_area, &mut table_state);
 
     let query_text = format!("> {}", app.query);
     let query_widget = Paragraph::new(query_text);
@@ -531,6 +514,36 @@ mod tests {
         assert!(
             text.contains("git status --short"),
             "collapsed command must appear as single line; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn scroll_brings_selected_row_into_view() {
+        const SMALL_HEIGHT: u16 = 8;
+        const SMALL_WIDTH: u16 = 80;
+        let mut app = App::new();
+        app.all_rows = (0..20)
+            .map(|i| make_row(&format!("cmd-row-{i:02}"), TEST_NOW - i * 60, 0, "p"))
+            .collect();
+        app.recompute();
+        app.selected = 15;
+
+        let backend = TestBackend::new(SMALL_WIDTH, SMALL_HEIGHT);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &app, TEST_NOW)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        let mut full_text = String::new();
+        for row in 0..SMALL_HEIGHT {
+            for col in 0..SMALL_WIDTH {
+                full_text.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+            }
+            full_text.push('\n');
+        }
+
+        assert!(
+            full_text.contains("cmd-row-15"),
+            "selected row 15 must be visible after scroll; buffer:\n{full_text}"
         );
     }
 

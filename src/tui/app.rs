@@ -58,7 +58,6 @@ pub struct App {
     pub all_rows: Vec<CommandRow>,
     pub filtered: Vec<usize>,
     pub selected: usize,
-    pub scroll: usize,
     pub filters: FilterState,
     pub action: Option<Action>,
 }
@@ -76,7 +75,6 @@ impl App {
             all_rows: vec![],
             filtered: vec![],
             selected: 0,
-            scroll: 0,
             filters: FilterState::new(),
             action: None,
         }
@@ -95,9 +93,6 @@ impl App {
         if self.selected > max {
             self.selected = max;
         }
-        if self.scroll > self.selected {
-            self.scroll = self.selected;
-        }
     }
 
     pub fn selected_command(&self) -> Option<&str> {
@@ -108,9 +103,6 @@ impl App {
     pub fn move_up(&mut self) {
         if self.selected > 0 {
             self.selected -= 1;
-        }
-        if self.scroll > self.selected {
-            self.scroll = self.selected;
         }
     }
 
