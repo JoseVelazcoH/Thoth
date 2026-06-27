@@ -301,7 +301,12 @@ pub fn run() -> Result<(), crate::error::ThothError> {
             }
             let cfg = crate::config::load();
             match crate::database::get_connection(None) {
-                Ok(mut conn) => crate::recorder::record(&args, cfg.session.gap_minutes, &mut conn),
+                Ok(mut conn) => crate::recorder::record(
+                    &args,
+                    cfg.session.gap_minutes,
+                    &cfg.history.filter,
+                    &mut conn,
+                ),
                 Err(e) => crate::logging::log_error(&e.to_string()),
             }
         }
@@ -374,10 +379,29 @@ pub fn run() -> Result<(), crate::error::ThothError> {
         Some(Cmd::Search(mut args)) => {
             let cfg = crate::config::load();
             let resolved_limit = args.limit.unwrap_or(cfg.search.default_limit);
-            args.limit = Some(resolved_limit);
+            let columns = crate::search::resolve_columns(&cfg.search.columns)?;
             let conn = crate::database::get_connection(None)?;
-            let rows = crate::search::execute(&args, &conn, now)?;
-            print!("{}", crate::search::render(&rows, args.show_session));
+
+            let rows = if cfg.search.filter.is_empty() {
+                args.limit = Some(resolved_limit);
+                crate::search::execute(&args, &conn, now)?
+            } else {
+                let (regexes, invalid) = crate::search::compile_filters(&cfg.search.filter);
+                for pat in &invalid {
+                    eprintln!("thoth: invalid search filter pattern (skipped): {}", pat);
+                }
+                args.limit = None;
+                let candidates = crate::search::execute(&args, &conn, now)?;
+                candidates
+                    .into_iter()
+                    .filter(|r| !crate::search::is_filtered(&r.command, &regexes))
+                    .take(resolved_limit)
+                    .collect()
+            };
+            print!(
+                "{}",
+                crate::search::render(&rows, &columns, args.show_session)
+            );
         }
         Some(Cmd::Sessions(args)) => {
             let conn = crate::database::get_connection(None)?;

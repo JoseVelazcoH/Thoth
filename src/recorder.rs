@@ -76,7 +76,22 @@ pub fn record_inner(
     Ok(())
 }
 
-pub fn record(args: &RecordArgs, gap_minutes: i64, conn: &mut Connection) {
+pub fn record(
+    args: &RecordArgs,
+    gap_minutes: i64,
+    history_filters: &[String],
+    conn: &mut Connection,
+) {
+    let (regexes, invalid) = crate::search::compile_filters(history_filters);
+    for pat in &invalid {
+        crate::logging::log_error(&format!(
+            "invalid history filter pattern (skipped): {}",
+            pat
+        ));
+    }
+    if crate::search::is_filtered(&args.cmd, &regexes) {
+        return;
+    }
     match record_inner(args, gap_minutes, conn) {
         Ok(()) => {}
         Err(ThothError::Sqlite(ref e))
@@ -290,7 +305,7 @@ mod tests {
         conn.execute_batch("DROP TABLE commands;").unwrap();
 
         let args = base_args();
-        record(&args, DEFAULT_GAP, &mut conn);
+        record(&args, DEFAULT_GAP, &[], &mut conn);
 
         let log = std::fs::read_to_string(&log_path).unwrap_or_default();
         assert!(!log.is_empty(), "error was not logged");
@@ -307,7 +322,7 @@ mod tests {
         blocker.execute("BEGIN IMMEDIATE", []).unwrap();
 
         let args = base_args();
-        record(&args, DEFAULT_GAP, &mut conn);
+        record(&args, DEFAULT_GAP, &[], &mut conn);
 
         drop(blocker);
 
@@ -318,5 +333,55 @@ mod tests {
             count, 0,
             "no row should have been inserted on double failure"
         );
+    }
+
+    #[test]
+    fn history_filter_matching_command_not_inserted() {
+        let mut conn = mem_conn();
+        let args = RecordArgs {
+            cmd: String::from("mysql --password=secret"),
+            ..base_args()
+        };
+        let filters = vec!["--password".to_string()];
+        record(&args, DEFAULT_GAP, &filters, &mut conn);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "matching command should not be inserted");
+    }
+
+    #[test]
+    fn history_filter_non_matching_command_is_inserted() {
+        let mut conn = mem_conn();
+        let filters = vec!["--password".to_string()];
+        record(&base_args(), DEFAULT_GAP, &filters, &mut conn);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "non-matching command should be inserted");
+    }
+
+    #[test]
+    fn history_filter_invalid_pattern_does_not_break_recording() {
+        let mut conn = mem_conn();
+        let filters = vec!["[invalid".to_string()];
+        record(&base_args(), DEFAULT_GAP, &filters, &mut conn);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "invalid pattern should be skipped; command should still be recorded"
+        );
+    }
+
+    #[test]
+    fn history_filter_empty_filter_records_all() {
+        let mut conn = mem_conn();
+        record(&base_args(), DEFAULT_GAP, &[], &mut conn);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }

@@ -23,6 +23,15 @@ orientation = "bottom"
 [search]
 # Default maximum number of results for `tth search`.
 default_limit = 50
+# Columns to show, in order. Available: timestamp, project, tags, exit, duration, directory, command
+# columns = ["timestamp", "project", "tags", "exit", "duration", "directory", "command"]
+#
+# Regex patterns; commands matching any pattern are hidden from search results.
+# filter = ["^ls$", "^cd "]
+
+[history]
+# Regex patterns; matching commands are NEVER recorded (useful to avoid storing secrets).
+# filter = ["--password", "export .*TOKEN", "AKIA[0-9A-Z]{16}"]
 "#;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
@@ -65,16 +74,42 @@ impl Default for Tui {
     }
 }
 
+pub fn default_search_columns() -> Vec<String> {
+    vec![
+        "timestamp".into(),
+        "project".into(),
+        "tags".into(),
+        "exit".into(),
+        "duration".into(),
+        "directory".into(),
+        "command".into(),
+    ]
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 #[serde(default)]
 pub struct Search {
     pub default_limit: usize,
+    #[serde(default = "default_search_columns")]
+    pub columns: Vec<String>,
+    #[serde(default)]
+    pub filter: Vec<String>,
 }
 
 impl Default for Search {
     fn default() -> Self {
-        Self { default_limit: 50 }
+        Self {
+            default_limit: 50,
+            columns: default_search_columns(),
+            filter: vec![],
+        }
     }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
+#[serde(default)]
+pub struct History {
+    pub filter: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default, PartialEq)]
@@ -83,6 +118,7 @@ pub struct Config {
     pub session: Session,
     pub tui: Tui,
     pub search: Search,
+    pub history: History,
 }
 
 fn config_path_from(thoth_config: Option<&str>, xdg_config: Option<&str>, home: &Path) -> PathBuf {
