@@ -192,6 +192,7 @@ mod tests {
             timestamp: Some(1000),
             tags: r#"["fix","perf"]"#.into(),
             terminal_id: None,
+            workspace: None,
         };
         let mut a1 = args_base.clone();
         a1.timestamp = Some(1001);

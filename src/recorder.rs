@@ -27,6 +27,10 @@ pub fn record_inner(
     conn: &mut Connection,
 ) -> Result<(), ThothError> {
     let tags = normalize_tags(&args.tags);
+    let workspace = args
+        .workspace
+        .as_deref()
+        .and_then(crate::workspaces::normalize_workspace);
     let directory = args.dir.clone().unwrap_or_else(|| {
         std::env::current_dir()
             .unwrap_or_default()
@@ -46,8 +50,8 @@ pub fn record_inner(
     let sid = get_or_create(&project, timestamp, gap_minutes, &tx)?;
 
     tx.execute(
-        "INSERT INTO commands(command, directory, project, session_id, timestamp, exit_code, duration_ms, tags, terminal_id) \
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO commands(command, directory, project, session_id, timestamp, exit_code, duration_ms, tags, terminal_id, workspace) \
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         rusqlite::params![
             args.cmd,
             directory,
@@ -57,7 +61,8 @@ pub fn record_inner(
             args.exit_code,
             args.duration,
             tags,
-            args.terminal_id
+            args.terminal_id,
+            workspace
         ],
     )?;
 
@@ -150,6 +155,7 @@ mod tests {
             timestamp: Some(1700000000),
             tags: String::from("[]"),
             terminal_id: None,
+            workspace: None,
         }
     }
 
@@ -242,6 +248,7 @@ mod tests {
             timestamp: Some(1700000000),
             tags: String::from("[]"),
             terminal_id: None,
+            workspace: None,
         };
         record_inner(&args, DEFAULT_GAP, &mut conn).unwrap();
         let count: i64 = conn
@@ -383,5 +390,58 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn workspace_stored_when_provided() {
+        let mut conn = mem_conn();
+        let args = RecordArgs {
+            workspace: Some(String::from("ws1")),
+            ..base_args()
+        };
+        record_inner(&args, DEFAULT_GAP, &mut conn).unwrap();
+        let val: Option<String> = conn
+            .query_row(
+                "SELECT workspace FROM commands WHERE command='echo hi'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(val, Some(String::from("ws1")));
+    }
+
+    #[test]
+    fn workspace_null_when_none() {
+        let mut conn = mem_conn();
+        record_inner(&base_args(), DEFAULT_GAP, &mut conn).unwrap();
+        let val: Option<String> = conn
+            .query_row(
+                "SELECT workspace FROM commands WHERE command='echo hi'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(val.is_none());
+    }
+
+    #[test]
+    fn workspace_null_when_empty_string() {
+        let mut conn = mem_conn();
+        let args = RecordArgs {
+            workspace: Some(String::from("")),
+            ..base_args()
+        };
+        record_inner(&args, DEFAULT_GAP, &mut conn).unwrap();
+        let val: Option<String> = conn
+            .query_row(
+                "SELECT workspace FROM commands WHERE command='echo hi'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            val.is_none(),
+            "empty workspace string must normalize to NULL"
+        );
     }
 }
