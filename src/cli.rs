@@ -307,9 +307,9 @@ pub fn run() -> Result<(), crate::error::ThothError> {
     match cli.cmd {
         None => {
             let cfg = crate::config::load();
-            let conn = crate::database::get_connection(None)?;
+            let mut conn = crate::database::get_connection(None)?;
             let columns = crate::tui::render::resolve_tui_columns(&cfg.tui.columns);
-            crate::tui::run(&conn, now, cfg.tui.orientation.is_bottom(), columns)?;
+            crate::tui::run(&mut conn, now, cfg.tui.orientation.is_bottom(), columns)?;
         }
         Some(Cmd::Record(mut args)) => {
             crate::logging::setup(crate::paths::resolve_error_log());

@@ -2,6 +2,32 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::tui::app::{Action, App, Confirm, Mode, Tab, WsPane};
 
+fn handle_edit_key(key: KeyEvent, app: &mut App) -> Outcome {
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        app.action = None;
+        return Outcome::Exit;
+    }
+    match key.code {
+        KeyCode::Esc => {
+            app.edit_cancel();
+            Outcome::Continue
+        }
+        KeyCode::Enter => {
+            app.edit_commit();
+            Outcome::Continue
+        }
+        KeyCode::Backspace => {
+            app.edit_backspace();
+            Outcome::Continue
+        }
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.edit_push(c);
+            Outcome::Continue
+        }
+        _ => Outcome::Continue,
+    }
+}
+
 fn handle_confirm_key(key: crossterm::event::KeyEvent, app: &mut App) -> Outcome {
     use crossterm::event::KeyCode;
     if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -36,6 +62,9 @@ pub enum Outcome {
 pub fn handle_key(key: KeyEvent, app: &mut App) -> Outcome {
     if app.confirm.is_some() {
         return handle_confirm_key(key, app);
+    }
+    if app.edit.is_some() {
+        return handle_edit_key(key, app);
     }
 
     match key.code {
@@ -133,6 +162,10 @@ fn handle_history_normal_key(key: KeyEvent, app: &mut App) -> Outcome {
             app.begin_delete_confirm_history();
             Outcome::Continue
         }
+        KeyCode::Char('e') => {
+            app.begin_edit_history();
+            Outcome::Continue
+        }
         KeyCode::Enter => {
             if let Some(cmd) = app.selected_command() {
                 app.action = Some(Action::Run(cmd.to_string()));
@@ -203,6 +236,10 @@ fn handle_ws_commands_key(key: KeyEvent, app: &mut App) -> Outcome {
         }
         KeyCode::Char('d') => {
             app.begin_delete_confirm_ws();
+            Outcome::Continue
+        }
+        KeyCode::Char('e') => {
+            app.begin_edit_ws();
             Outcome::Continue
         }
         _ => Outcome::Continue,
@@ -780,6 +817,113 @@ mod tests {
         assert!(
             matches!(app.confirm.as_ref(), Some(Confirm::Replay(_))),
             "Enter in Workspaces List must open Replay confirm, not Delete"
+        );
+    }
+
+    #[test]
+    fn history_normal_e_opens_edit() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        let outcome = handle_key(key(KeyCode::Char('e')), &mut app);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert!(
+            app.edit.is_some(),
+            "e must open edit modal in History Normal"
+        );
+    }
+
+    #[test]
+    fn ws_commands_e_opens_edit() {
+        let mut app = app_with_workspaces_and_commands();
+        app.ws_pane = WsPane::Commands;
+        let outcome = handle_key(key(KeyCode::Char('e')), &mut app);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert!(app.edit.is_some(), "e must open edit modal in Ws Commands");
+    }
+
+    #[test]
+    fn edit_char_appends_to_buffer_not_query() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        handle_key(key(KeyCode::Char('e')), &mut app);
+        assert!(app.edit.is_some());
+        let query_before = app.query.clone();
+        handle_key(key(KeyCode::Char('x')), &mut app);
+        assert_eq!(
+            app.query, query_before,
+            "typing while editing must not change query"
+        );
+        assert!(
+            app.edit.as_ref().unwrap().buffer.ends_with('x'),
+            "x must append to edit buffer"
+        );
+    }
+
+    #[test]
+    fn edit_backspace_removes_from_buffer() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        handle_key(key(KeyCode::Char('e')), &mut app);
+        let original_len = app.edit.as_ref().unwrap().buffer.len();
+        handle_key(key(KeyCode::Backspace), &mut app);
+        assert_eq!(
+            app.edit.as_ref().unwrap().buffer.len(),
+            original_len.saturating_sub(1)
+        );
+    }
+
+    #[test]
+    fn edit_enter_commits_and_sets_pending_edit() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        handle_key(key(KeyCode::Char('e')), &mut app);
+        assert!(app.edit.is_some());
+        let outcome = handle_key(key(KeyCode::Enter), &mut app);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert!(app.edit.is_none(), "edit must be cleared after Enter");
+        assert!(
+            app.pending_edit.is_some(),
+            "pending_edit must be set after Enter"
+        );
+    }
+
+    #[test]
+    fn edit_esc_cancels() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        handle_key(key(KeyCode::Char('e')), &mut app);
+        assert!(app.edit.is_some());
+        let outcome = handle_key(key(KeyCode::Esc), &mut app);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert!(app.edit.is_none(), "Esc must cancel edit");
+        assert!(app.pending_edit.is_none());
+    }
+
+    #[test]
+    fn ctrl_c_exits_even_while_editing() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        handle_key(key(KeyCode::Char('e')), &mut app);
+        assert!(app.edit.is_some());
+        let outcome = handle_key(ctrl(KeyCode::Char('c')), &mut app);
+        assert!(
+            matches!(outcome, Outcome::Exit),
+            "Ctrl-C must exit from edit mode"
+        );
+    }
+
+    #[test]
+    fn left_right_do_not_switch_tabs_while_editing() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        handle_key(key(KeyCode::Char('e')), &mut app);
+        assert!(app.edit.is_some());
+        let tab_before = app.tab;
+        handle_key(key(KeyCode::Left), &mut app);
+        handle_key(key(KeyCode::Right), &mut app);
+        assert_eq!(
+            app.tab, tab_before,
+            "Left/Right must not switch tab while editing"
         );
     }
 }
