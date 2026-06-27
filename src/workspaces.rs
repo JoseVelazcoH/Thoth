@@ -32,7 +32,7 @@ pub fn list_workspace_commands(
     name: &str,
 ) -> Result<Vec<CommandRow>, ThothError> {
     let mut stmt = conn.prepare(
-        "SELECT c.timestamp, c.project, c.tags, c.exit_code, c.duration_ms, \
+        "SELECT c.id, c.timestamp, c.project, c.tags, c.exit_code, c.duration_ms, \
          c.directory, c.command, c.session_id, c.workspace \
          FROM commands c \
          WHERE c.workspace = ? \
@@ -40,15 +40,16 @@ pub fn list_workspace_commands(
     )?;
     let rows = stmt.query_map([name], |row| {
         Ok(CommandRow {
-            timestamp: row.get(0)?,
-            project: row.get(1)?,
-            tags: row.get(2)?,
-            exit_code: row.get(3)?,
-            duration_ms: row.get(4)?,
-            directory: row.get(5)?,
-            command: row.get(6)?,
-            session_id: row.get(7)?,
-            workspace: row.get(8)?,
+            id: row.get(0)?,
+            timestamp: row.get(1)?,
+            project: row.get(2)?,
+            tags: row.get(3)?,
+            exit_code: row.get(4)?,
+            duration_ms: row.get(5)?,
+            directory: row.get(6)?,
+            command: row.get(7)?,
+            session_id: row.get(8)?,
+            workspace: row.get(9)?,
         })
     })?;
     let mut result = Vec::new();

@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::search::{Column, CommandRow};
-use crate::tui::app::{App, Tab};
+use crate::tui::app::{App, Confirm, Mode, Tab, WsPane};
 use crate::tui::time::format_relative;
 use crate::workspaces::WorkspaceRow;
 
@@ -312,12 +312,16 @@ fn render_workspaces_pane(
     app: &App,
     now: i64,
     table_state: &mut TableState,
+    cmd_table_state: &mut TableState,
 ) {
     let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
-    let border_style = Style::default().fg(BORDER_COLOR);
     let highlight_style = Style::default()
         .add_modifier(Modifier::REVERSED)
         .add_modifier(Modifier::BOLD);
+
+    let list_focused = app.ws_pane == WsPane::List;
+    let accent_border = Style::default().fg(ACCENT);
+    let dim_border = Style::default().fg(BORDER_COLOR);
 
     let h_chunks = Layout::horizontal([Constraint::Percentage(38), Constraint::Min(1)]).split(area);
 
@@ -327,8 +331,19 @@ fn render_workspaces_pane(
     let workspaces_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(border_style)
-        .title(Span::styled(" workspaces ", dim_style));
+        .border_style(if list_focused {
+            accent_border
+        } else {
+            dim_border
+        })
+        .title(Span::styled(
+            " workspaces ",
+            if list_focused {
+                Style::default().fg(ACCENT)
+            } else {
+                dim_style
+            },
+        ));
 
     let inner_left = workspaces_block.inner(left_area);
     frame.render_widget(workspaces_block, left_area);
@@ -353,11 +368,23 @@ fn render_workspaces_pane(
         frame.render_stateful_widget(table, inner_left, table_state);
     }
 
+    let commands_focused = app.ws_pane == WsPane::Commands;
     let commands_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(border_style)
-        .title(Span::styled(" commands ", dim_style));
+        .border_style(if commands_focused {
+            accent_border
+        } else {
+            dim_border
+        })
+        .title(Span::styled(
+            " commands ",
+            if commands_focused {
+                Style::default().fg(ACCENT)
+            } else {
+                dim_style
+            },
+        ));
 
     let inner_right = commands_block.inner(right_area);
     frame.render_widget(commands_block, right_area);
@@ -393,8 +420,16 @@ fn render_workspaces_pane(
             Constraint::Min(1),
         ];
 
-        let table = Table::new(rows, widths).block(Block::default());
-        frame.render_widget(table, inner_right);
+        if commands_focused {
+            let table = Table::new(rows, widths)
+                .block(Block::default())
+                .row_highlight_style(highlight_style);
+            cmd_table_state.select(Some(app.ws_cmd_selected));
+            frame.render_stateful_widget(table, inner_right, cmd_table_state);
+        } else {
+            let table = Table::new(rows, widths).block(Block::default());
+            frame.render_widget(table, inner_right);
+        }
     }
 }
 
@@ -416,6 +451,26 @@ pub fn draw(
     is_bottom: bool,
     columns: &[Column],
     table_state: &mut TableState,
+) {
+    draw_with_cmd_state(
+        frame,
+        app,
+        now,
+        is_bottom,
+        columns,
+        table_state,
+        &mut TableState::default(),
+    );
+}
+
+pub fn draw_with_cmd_state(
+    frame: &mut Frame,
+    app: &App,
+    now: i64,
+    is_bottom: bool,
+    columns: &[Column],
+    table_state: &mut TableState,
+    cmd_table_state: &mut TableState,
 ) {
     let area = frame.area();
 
@@ -481,7 +536,7 @@ pub fn draw(
             );
         }
         Tab::Workspaces => {
-            render_workspaces_pane(frame, middle_area, app, now, table_state);
+            render_workspaces_pane(frame, middle_area, app, now, table_state, cmd_table_state);
         }
     }
 
@@ -505,35 +560,74 @@ pub fn draw(
     );
 
     let controls_line = match app.tab {
-        Tab::History => Line::from(vec![
-            Span::styled(" ←→", accent_style),
-            Span::styled(" tabs", dim_style),
-            Span::styled(" · ", dim_style),
-            Span::styled("↑↓", accent_style),
-            Span::styled(" navigate", dim_style),
-            Span::styled(" · ", dim_style),
-            Span::styled("↵", accent_style),
-            Span::styled(" run", dim_style),
-            Span::styled(" · ", dim_style),
-            Span::styled("⇥", accent_style),
-            Span::styled(" edit", dim_style),
-            Span::styled(" · ", dim_style),
-            Span::styled("esc", accent_style),
-            Span::styled(" quit", dim_style),
-        ]),
-        Tab::Workspaces => Line::from(vec![
-            Span::styled(" ←→", accent_style),
-            Span::styled(" tabs", dim_style),
-            Span::styled(" · ", dim_style),
-            Span::styled("↑↓", accent_style),
-            Span::styled(" workspace", dim_style),
-            Span::styled(" · ", dim_style),
-            Span::styled("↵", accent_style),
-            Span::styled(" replay", dim_style),
-            Span::styled(" · ", dim_style),
-            Span::styled("esc", accent_style),
-            Span::styled(" quit", dim_style),
-        ]),
+        Tab::History => match app.mode {
+            Mode::Insert => Line::from(vec![
+                Span::styled(" ↑↓", accent_style),
+                Span::styled(" nav", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("↵", accent_style),
+                Span::styled(" run", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("⇥", accent_style),
+                Span::styled(" edit", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("esc", accent_style),
+                Span::styled(" normal", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("^c", accent_style),
+                Span::styled(" quit", dim_style),
+            ]),
+            Mode::Normal => Line::from(vec![
+                Span::styled(" j/k", accent_style),
+                Span::styled(" move", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("d", accent_style),
+                Span::styled(" delete", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("↵", accent_style),
+                Span::styled(" run", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("i", accent_style),
+                Span::styled(" search", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("q", accent_style),
+                Span::styled(" quit", dim_style),
+            ]),
+        },
+        Tab::Workspaces => match app.ws_pane {
+            WsPane::List => Line::from(vec![
+                Span::styled(" ←→", accent_style),
+                Span::styled(" tabs", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("↑↓", accent_style),
+                Span::styled(" workspace", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("⇥", accent_style),
+                Span::styled(" commands", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("↵", accent_style),
+                Span::styled(" replay", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("esc", accent_style),
+                Span::styled(" quit", dim_style),
+            ]),
+            WsPane::Commands => Line::from(vec![
+                Span::styled(" ←→", accent_style),
+                Span::styled(" tabs", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("↑↓", accent_style),
+                Span::styled(" command", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("d", accent_style),
+                Span::styled(" delete", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("⇥", accent_style),
+                Span::styled(" back", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("esc", accent_style),
+                Span::styled(" quit", dim_style),
+            ]),
+        },
     };
     frame.render_widget(Paragraph::new(controls_line), controls_area);
 }
@@ -570,32 +664,61 @@ fn render_confirm_modal(frame: &mut Frame, area: Rect, app: &crate::tui::app::Ap
 
     frame.render_widget(Clear, modal_area);
 
-    let ws_name = truncate(&confirm.workspace, 20);
-    let title = format!(" Replay '{ws_name}' ({} commands)? ", confirm.count);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(ACCENT))
-        .title(Span::styled(title, accent_style));
+    match confirm {
+        Confirm::Replay(r) => {
+            let ws_name = truncate(&r.workspace, 20);
+            let title = format!(" Replay '{ws_name}' ({} commands)? ", r.count);
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(ACCENT))
+                .title(Span::styled(title, accent_style));
 
-    let inner = block.inner(modal_area);
-    frame.render_widget(block, modal_area);
+            let inner = block.inner(modal_area);
+            frame.render_widget(block, modal_area);
 
-    let hint = Paragraph::new(Line::from(vec![
-        Span::styled("[y]", accent_style),
-        Span::styled(" run all   ", dim_style),
-        Span::styled("[n]", accent_style),
-        Span::styled(" cancel", dim_style),
-    ]))
-    .alignment(Alignment::Center);
-    frame.render_widget(hint, inner);
+            let hint = Paragraph::new(Line::from(vec![
+                Span::styled("[y]", accent_style),
+                Span::styled(" run all   ", dim_style),
+                Span::styled("[n]", accent_style),
+                Span::styled(" cancel", dim_style),
+            ]))
+            .alignment(Alignment::Center);
+            frame.render_widget(hint, inner);
+        }
+        Confirm::Delete(d) => {
+            let label = truncate(&d.label, 30);
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Red))
+                .title(Span::styled(
+                    " Delete this command? ",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ));
+
+            let inner = block.inner(modal_area);
+            frame.render_widget(block, modal_area);
+
+            let hint = Paragraph::new(Line::from(vec![
+                Span::styled(&label, dim_style),
+                Span::styled("  ", dim_style),
+                Span::styled("[y]", accent_style),
+                Span::styled(" delete   ", dim_style),
+                Span::styled("[n]", accent_style),
+                Span::styled(" cancel", dim_style),
+            ]))
+            .alignment(Alignment::Center);
+            frame.render_widget(hint, inner);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::default_tui_columns;
-    use crate::tui::app::{Action, App, Tab};
+    use crate::tui::app::{Action, App, Confirm, ConfirmDelete, DeleteOrigin, Tab, WsPane};
     use crate::workspaces::WorkspaceRow;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -606,6 +729,7 @@ mod tests {
 
     fn make_row(cmd: &str, ts: i64, exit: i64, project: &str) -> CommandRow {
         CommandRow {
+            id: 0,
             command: cmd.to_string(),
             timestamp: ts,
             exit_code: exit,
@@ -827,23 +951,52 @@ mod tests {
     }
 
     #[test]
-    fn controls_history_shows_navigate_and_run() {
+    fn controls_history_insert_shows_nav_and_run() {
         let app = app_with_rows();
         let text = render_app(&app);
         assert!(
-            text.contains("navigate"),
-            "History controls must contain 'navigate'"
+            text.contains("nav"),
+            "History Insert controls must contain 'nav'"
         );
-        assert!(text.contains("run"), "History controls must contain 'run'");
+        assert!(
+            text.contains("run"),
+            "History Insert controls must contain 'run'"
+        );
         assert!(
             text.contains("edit"),
-            "History controls must contain 'edit'"
+            "History Insert controls must contain 'edit'"
+        );
+        assert!(
+            text.contains("normal"),
+            "History Insert controls must hint 'normal' for esc"
+        );
+    }
+
+    #[test]
+    fn controls_history_normal_shows_jk_and_delete() {
+        let mut app = app_with_rows();
+        app.mode = crate::tui::app::Mode::Normal;
+        let text = render_app(&app);
+        assert!(
+            text.contains("move"),
+            "History Normal controls must contain 'move'"
+        );
+        assert!(
+            text.contains("delete"),
+            "History Normal controls must contain 'delete'"
+        );
+        assert!(
+            text.contains("run"),
+            "History Normal controls must contain 'run'"
+        );
+        assert!(
+            text.contains("search"),
+            "History Normal controls must contain 'search'"
         );
         assert!(
             text.contains("quit"),
-            "History controls must contain 'quit'"
+            "History Normal controls must contain 'quit'"
         );
-        assert!(text.contains("tabs"), "History controls must hint 'tabs'");
     }
 
     #[test]
@@ -1789,10 +1942,12 @@ mod tests {
     #[test]
     fn confirm_modal_shows_when_confirm_is_set() {
         let mut app = app_with_workspaces();
-        app.confirm = Some(crate::tui::app::ConfirmReplay {
-            workspace: "proj-alpha".into(),
-            count: 5,
-        });
+        app.confirm = Some(crate::tui::app::Confirm::Replay(
+            crate::tui::app::ConfirmReplay {
+                workspace: "proj-alpha".into(),
+                count: 5,
+            },
+        ));
         let text = render_app(&app);
         assert!(
             text.contains("proj-alpha"),
@@ -1853,5 +2008,206 @@ mod tests {
 
         assert!(text.contains("workspaces"), "must show workspaces pane");
         assert!(text.contains("commands"), "must show commands pane");
+    }
+
+    #[test]
+    fn delete_confirm_modal_shows_delete_text() {
+        let mut app = app_with_workspaces();
+        app.confirm = Some(Confirm::Delete(ConfirmDelete {
+            id: 42,
+            label: "cargo build --release".into(),
+            origin: DeleteOrigin::History,
+        }));
+        let text = render_app(&app);
+        assert!(
+            text.contains("Delete"),
+            "delete confirm modal must show 'Delete'; got:\n{text}"
+        );
+        assert!(
+            text.contains("[y]") || text.contains("y"),
+            "delete confirm modal must show y hint; got:\n{text}"
+        );
+        assert!(
+            text.contains("[n]") || text.contains("n"),
+            "delete confirm modal must show n hint; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn ws_list_pane_focused_has_accent_border() {
+        let app = app_with_workspaces();
+        assert_eq!(app.ws_pane, WsPane::List);
+        let buf = render_app_buf(&app);
+        let list_pane_area_x = 1u16;
+        let any_accent_in_left_border = (0..TEST_HEIGHT).any(|row_y| {
+            let cell = &buf[(list_pane_area_x, row_y)];
+            cell.style().fg == Some(ACCENT)
+        });
+        assert!(
+            any_accent_in_left_border,
+            "focused List pane must have ACCENT border somewhere; ws_pane=List"
+        );
+    }
+
+    #[test]
+    fn ws_commands_pane_focused_has_accent_border() {
+        let mut app = app_with_workspaces();
+        app.ws_pane = WsPane::Commands;
+        let buf = render_app_buf(&app);
+        let cmd_pane_x = (TEST_WIDTH as f32 * 0.38) as u16 + 1;
+        let any_accent_in_cmd_border = (0..TEST_HEIGHT).any(|row_y| {
+            let cell = &buf[(cmd_pane_x, row_y)];
+            cell.style().fg == Some(ACCENT)
+        });
+        assert!(
+            any_accent_in_cmd_border,
+            "focused Commands pane must have ACCENT border somewhere; ws_pane=Commands"
+        );
+    }
+
+    #[test]
+    fn controls_workspaces_commands_pane_shows_delete_hint() {
+        let mut app = app_with_workspaces();
+        app.ws_pane = WsPane::Commands;
+        let text = render_app(&app);
+        assert!(
+            text.contains("delete"),
+            "Workspaces Commands controls must contain 'delete'; got:\n{text}"
+        );
+        assert!(
+            text.contains("back"),
+            "Workspaces Commands controls must contain 'back'; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn dump_pr4a_screenshots() {
+        const NOW: i64 = 1_000_000_000;
+        const W: u16 = 100;
+        const H: u16 = 18;
+
+        let make_r = |cmd: &str, ts: i64, exit: i64| CommandRow {
+            id: 0,
+            command: cmd.to_string(),
+            timestamp: ts,
+            exit_code: exit,
+            project: "proj".to_string(),
+            directory: "/home/user/proj".to_string(),
+            tags: "[]".to_string(),
+            session_id: "s1".to_string(),
+            duration_ms: 100,
+            workspace: None,
+        };
+
+        let make_rows = || {
+            vec![
+                make_r("git status", NOW - 60, 0),
+                make_r("cargo build --release", NOW - 300, 0),
+                make_r("cargo test", NOW - 1200, 0),
+                make_r("docker run -p 8080:80 nginx", NOW - 3600, 1),
+            ]
+        };
+
+        let render_text = |app: &App| -> String {
+            let backend = TestBackend::new(W, H);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let mut ts = TableState::default();
+            let mut cts = TableState::default();
+            let cols = default_cols();
+            terminal
+                .draw(|f| draw_with_cmd_state(f, app, NOW, true, &cols, &mut ts, &mut cts))
+                .unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let mut lines: Vec<String> = Vec::new();
+            for row in 0..H {
+                let mut line = String::new();
+                for col in 0..W {
+                    line.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+                }
+                lines.push(line.trim_end().to_string());
+            }
+            lines.join("\n")
+        };
+
+        let mut app_a = App::new();
+        app_a.all_rows = make_rows();
+        app_a.recompute();
+        app_a.enter_normal_mode();
+        app_a.selected = 1;
+        let dump_a = render_text(&app_a);
+        println!("\n=== DUMP (a): History in Normal mode ===\n{dump_a}");
+
+        let mut app_b = App::new();
+        app_b.all_rows = make_rows();
+        app_b.recompute();
+        app_b.selected = 0;
+        app_b.confirm = Some(Confirm::Delete(ConfirmDelete {
+            id: 42,
+            label: "cargo test".into(),
+            origin: DeleteOrigin::History,
+        }));
+        let dump_b = render_text(&app_b);
+        println!("\n=== DUMP (b): Delete confirm modal ===\n{dump_b}");
+
+        let ws_rows = vec![
+            CommandRow {
+                id: 1,
+                command: "git status".into(),
+                timestamp: NOW - 500,
+                exit_code: 0,
+                project: "proj".into(),
+                directory: "/home/user".into(),
+                tags: "[]".into(),
+                session_id: "s1".into(),
+                duration_ms: 50,
+                workspace: Some("my-workspace".into()),
+            },
+            CommandRow {
+                id: 2,
+                command: "cargo build --release".into(),
+                timestamp: NOW - 400,
+                exit_code: 0,
+                project: "proj".into(),
+                directory: "/home/user".into(),
+                tags: "[]".into(),
+                session_id: "s1".into(),
+                duration_ms: 8000,
+                workspace: Some("my-workspace".into()),
+            },
+            CommandRow {
+                id: 3,
+                command: "cargo test -- --nocapture".into(),
+                timestamp: NOW - 300,
+                exit_code: 1,
+                project: "proj".into(),
+                directory: "/home/user".into(),
+                tags: "[]".into(),
+                session_id: "s1".into(),
+                duration_ms: 3000,
+                workspace: Some("my-workspace".into()),
+            },
+        ];
+        use crate::workspaces::WorkspaceRow;
+        let mut app_c = App::new();
+        app_c.tab = Tab::Workspaces;
+        app_c.ws_pane = WsPane::Commands;
+        app_c.workspaces = vec![WorkspaceRow {
+            name: "my-workspace".into(),
+            command_count: 3,
+            first_ts: NOW - 500,
+            last_ts: NOW - 300,
+        }];
+        app_c.ws_selected = 0;
+        app_c.ws_commands = ws_rows;
+        app_c.ws_cmd_selected = 1;
+        let dump_c = render_text(&app_c);
+        println!("\n=== DUMP (c): Workspaces with Commands pane focused ===\n{dump_c}");
+
+        assert!(dump_a.contains("j/k"), "Normal mode controls must show j/k");
+        assert!(dump_b.contains("Delete"), "Delete modal must show 'Delete'");
+        assert!(
+            dump_c.contains("back"),
+            "Commands pane controls must show 'back'"
+        );
     }
 }

@@ -7,12 +7,49 @@ use crate::tui::fuzzy;
 use crate::workspaces::WorkspaceRow;
 
 const TUI_LIMIT: usize = 5000;
+const LABEL_MAX: usize = 40;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Tab {
     #[default]
     History,
     Workspaces,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Mode {
+    #[default]
+    Insert,
+    Normal,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum WsPane {
+    #[default]
+    List,
+    Commands,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DeleteOrigin {
+    History,
+    Workspace,
+}
+
+pub struct ConfirmReplay {
+    pub workspace: String,
+    pub count: usize,
+}
+
+pub struct ConfirmDelete {
+    pub id: i64,
+    pub label: String,
+    pub origin: DeleteOrigin,
+}
+
+pub enum Confirm {
+    Replay(ConfirmReplay),
+    Delete(ConfirmDelete),
 }
 
 pub struct FilterState {
@@ -64,11 +101,6 @@ pub enum Action {
     Replay(String),
 }
 
-pub struct ConfirmReplay {
-    pub workspace: String,
-    pub count: usize,
-}
-
 pub struct App {
     pub query: String,
     pub all_rows: Vec<CommandRow>,
@@ -77,14 +109,18 @@ pub struct App {
     pub filters: FilterState,
     pub action: Option<Action>,
     pub tab: Tab,
+    pub mode: Mode,
     pub workspaces: Vec<WorkspaceRow>,
     pub ws_selected: usize,
     pub ws_commands: Vec<CommandRow>,
+    pub ws_pane: WsPane,
+    pub ws_cmd_selected: usize,
     pub needs_ws_reload: bool,
     pub needs_ws_commands_reload: bool,
     pub needs_history_reload: bool,
-    pub confirm: Option<ConfirmReplay>,
+    pub confirm: Option<Confirm>,
     pub replay_workspace: Option<String>,
+    pub pending_delete: Option<(i64, DeleteOrigin)>,
 }
 
 impl Default for App {
@@ -103,14 +139,94 @@ impl App {
             filters: FilterState::new(),
             action: None,
             tab: Tab::History,
+            mode: Mode::Insert,
             workspaces: vec![],
             ws_selected: 0,
             ws_commands: vec![],
+            ws_pane: WsPane::List,
+            ws_cmd_selected: 0,
             needs_ws_reload: false,
             needs_ws_commands_reload: false,
             needs_history_reload: false,
             confirm: None,
             replay_workspace: None,
+            pending_delete: None,
+        }
+    }
+
+    pub fn enter_normal_mode(&mut self) {
+        self.mode = Mode::Normal;
+    }
+
+    pub fn enter_insert_mode(&mut self) {
+        self.mode = Mode::Insert;
+    }
+
+    pub fn toggle_ws_pane(&mut self) {
+        match self.ws_pane {
+            WsPane::List => {
+                self.ws_pane = WsPane::Commands;
+                let max = self.ws_commands.len().saturating_sub(1);
+                if self.ws_cmd_selected > max {
+                    self.ws_cmd_selected = 0;
+                }
+            }
+            WsPane::Commands => {
+                self.ws_pane = WsPane::List;
+            }
+        }
+    }
+
+    pub fn ws_cmd_move_up(&mut self) {
+        if self.ws_cmd_selected > 0 {
+            self.ws_cmd_selected -= 1;
+        }
+    }
+
+    pub fn ws_cmd_move_down(&mut self) {
+        let max = self.ws_commands.len().saturating_sub(1);
+        if self.ws_cmd_selected < max {
+            self.ws_cmd_selected += 1;
+        }
+    }
+
+    pub fn selected_history_id(&self) -> Option<i64> {
+        let idx = self.filtered.get(self.selected)?;
+        self.all_rows.get(*idx).map(|r| r.id)
+    }
+
+    pub fn selected_ws_command_id(&self) -> Option<i64> {
+        self.ws_commands.get(self.ws_cmd_selected).map(|r| r.id)
+    }
+
+    pub fn begin_delete_confirm_history(&mut self) {
+        if let Some(id) = self.selected_history_id() {
+            let label = self
+                .filtered
+                .get(self.selected)
+                .and_then(|idx| self.all_rows.get(*idx))
+                .map(|r| truncate_label(&r.command))
+                .unwrap_or_default();
+            self.confirm = Some(Confirm::Delete(ConfirmDelete {
+                id,
+                label,
+                origin: DeleteOrigin::History,
+            }));
+        }
+    }
+
+    pub fn begin_delete_confirm_ws(&mut self) {
+        if let Some(id) = self.selected_ws_command_id() {
+            let label = self
+                .ws_commands
+                .get(self.ws_cmd_selected)
+                .map(|r| truncate_label(&r.command))
+                .unwrap_or_default();
+            self.confirm = Some(Confirm::Delete(ConfirmDelete {
+                id,
+                label,
+                origin: DeleteOrigin::Workspace,
+            }));
         }
     }
 
@@ -118,7 +234,7 @@ impl App {
         if let Some(ws) = self.selected_workspace() {
             let workspace = ws.name.clone();
             let count = self.ws_commands.len();
-            self.confirm = Some(ConfirmReplay { workspace, count });
+            self.confirm = Some(Confirm::Replay(ConfirmReplay { workspace, count }));
         }
     }
 
@@ -184,6 +300,10 @@ impl App {
         } else {
             self.ws_commands.clear();
         }
+        let max = self.ws_commands.len().saturating_sub(1);
+        if self.ws_cmd_selected > max {
+            self.ws_cmd_selected = 0;
+        }
         self.needs_ws_commands_reload = false;
         Ok(())
     }
@@ -212,6 +332,19 @@ impl App {
         if self.selected > 0 {
             self.selected -= 1;
         }
+    }
+}
+
+fn truncate_label(s: &str) -> String {
+    if s.chars().count() <= LABEL_MAX {
+        s.to_string()
+    } else {
+        let end = s
+            .char_indices()
+            .nth(LABEL_MAX.saturating_sub(1))
+            .map(|(i, _)| i)
+            .unwrap_or(s.len());
+        format!("{}...", &s[..end])
     }
 }
 
@@ -552,6 +685,7 @@ mod tests {
         app.ws_selected = 0;
         app.ws_commands = (0..cmd_count)
             .map(|i| crate::search::CommandRow {
+                id: (i + 1) as i64,
                 command: format!("cmd-{i}"),
                 directory: "/tmp".into(),
                 project: "p".into(),
@@ -571,8 +705,7 @@ mod tests {
         let mut app = app_with_ws("demo", 3);
         app.begin_replay_confirm();
         let c = app.confirm.as_ref().unwrap();
-        assert_eq!(c.workspace, "demo");
-        assert_eq!(c.count, 3);
+        assert!(matches!(c, Confirm::Replay(r) if r.workspace == "demo" && r.count == 3));
     }
 
     #[test]
@@ -586,6 +719,171 @@ mod tests {
     fn cancel_confirm_clears_confirm() {
         let mut app = app_with_ws("ws-x", 2);
         app.begin_replay_confirm();
+        assert!(app.confirm.is_some());
+        app.cancel_confirm();
+        assert!(app.confirm.is_none());
+    }
+
+    #[test]
+    fn enter_normal_mode_sets_normal() {
+        let mut app = App::new();
+        assert_eq!(app.mode, Mode::Insert);
+        app.enter_normal_mode();
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn enter_insert_mode_sets_insert() {
+        let mut app = App::new();
+        app.enter_normal_mode();
+        assert_eq!(app.mode, Mode::Normal);
+        app.enter_insert_mode();
+        assert_eq!(app.mode, Mode::Insert);
+    }
+
+    #[test]
+    fn toggle_ws_pane_list_to_commands() {
+        let mut app = App::new();
+        assert_eq!(app.ws_pane, WsPane::List);
+        app.toggle_ws_pane();
+        assert_eq!(app.ws_pane, WsPane::Commands);
+    }
+
+    #[test]
+    fn toggle_ws_pane_commands_to_list() {
+        let mut app = App::new();
+        app.ws_pane = WsPane::Commands;
+        app.toggle_ws_pane();
+        assert_eq!(app.ws_pane, WsPane::List);
+    }
+
+    #[test]
+    fn toggle_ws_pane_clamps_cmd_selected() {
+        let mut app = app_with_ws("demo", 2);
+        app.ws_cmd_selected = 5;
+        app.toggle_ws_pane();
+        assert!(
+            app.ws_cmd_selected <= 1,
+            "ws_cmd_selected must clamp to valid range after toggling to Commands"
+        );
+    }
+
+    #[test]
+    fn ws_cmd_move_up_decreases() {
+        let mut app = app_with_ws("demo", 3);
+        app.ws_pane = WsPane::Commands;
+        app.ws_cmd_selected = 2;
+        app.ws_cmd_move_up();
+        assert_eq!(app.ws_cmd_selected, 1);
+    }
+
+    #[test]
+    fn ws_cmd_move_up_clamps_at_zero() {
+        let mut app = app_with_ws("demo", 3);
+        app.ws_pane = WsPane::Commands;
+        app.ws_cmd_selected = 0;
+        app.ws_cmd_move_up();
+        assert_eq!(app.ws_cmd_selected, 0);
+    }
+
+    #[test]
+    fn ws_cmd_move_down_increases() {
+        let mut app = app_with_ws("demo", 3);
+        app.ws_pane = WsPane::Commands;
+        app.ws_cmd_selected = 0;
+        app.ws_cmd_move_down();
+        assert_eq!(app.ws_cmd_selected, 1);
+    }
+
+    #[test]
+    fn ws_cmd_move_down_clamps_at_max() {
+        let mut app = app_with_ws("demo", 3);
+        app.ws_pane = WsPane::Commands;
+        app.ws_cmd_selected = 2;
+        app.ws_cmd_move_down();
+        assert_eq!(app.ws_cmd_selected, 2);
+    }
+
+    #[test]
+    fn selected_history_id_returns_correct_id() {
+        let conn = make_conn();
+        seed(&conn, "git status", 2000);
+        seed(&conn, "ls -la", 1000);
+        let mut app = App::new();
+        app.reload(&conn, 9999).unwrap();
+        app.selected = 0;
+        let id = app.selected_history_id().unwrap();
+        assert!(id > 0);
+        let row = &app.all_rows[app.filtered[0]];
+        assert_eq!(id, row.id);
+    }
+
+    #[test]
+    fn selected_history_id_none_when_empty() {
+        let app = App::new();
+        assert!(app.selected_history_id().is_none());
+    }
+
+    #[test]
+    fn selected_ws_command_id_returns_correct_id() {
+        let app = app_with_ws("demo", 3);
+        let id = app.selected_ws_command_id().unwrap();
+        assert_eq!(id, app.ws_commands[0].id);
+    }
+
+    #[test]
+    fn selected_ws_command_id_uses_ws_cmd_selected() {
+        let mut app = app_with_ws("demo", 3);
+        app.ws_cmd_selected = 2;
+        let id = app.selected_ws_command_id().unwrap();
+        assert_eq!(id, app.ws_commands[2].id);
+    }
+
+    #[test]
+    fn begin_delete_confirm_history_sets_delete_confirm() {
+        let conn = make_conn();
+        seed(&conn, "git status", 2000);
+        let mut app = App::new();
+        app.reload(&conn, 9999).unwrap();
+        app.selected = 0;
+        let expected_id = app.selected_history_id().unwrap();
+        app.begin_delete_confirm_history();
+        let c = app.confirm.as_ref().unwrap();
+        assert!(
+            matches!(c, Confirm::Delete(d) if d.id == expected_id && matches!(d.origin, DeleteOrigin::History))
+        );
+    }
+
+    #[test]
+    fn begin_delete_confirm_history_no_rows_does_nothing() {
+        let mut app = App::new();
+        app.begin_delete_confirm_history();
+        assert!(app.confirm.is_none());
+    }
+
+    #[test]
+    fn begin_delete_confirm_ws_sets_delete_confirm() {
+        let mut app = app_with_ws("demo", 2);
+        app.ws_cmd_selected = 0;
+        let expected_id = app.ws_commands[0].id;
+        app.begin_delete_confirm_ws();
+        let c = app.confirm.as_ref().unwrap();
+        assert!(
+            matches!(c, Confirm::Delete(d) if d.id == expected_id && matches!(d.origin, DeleteOrigin::Workspace))
+        );
+    }
+
+    #[test]
+    fn begin_delete_confirm_ws_no_commands_does_nothing() {
+        let mut app = App::new();
+        app.begin_delete_confirm_ws();
+        assert!(app.confirm.is_none());
+    }
+
+    #[test]
+    fn cancel_confirm_clears_delete_confirm() {
+        let mut app = app_with_ws("demo", 2);
+        app.begin_delete_confirm_ws();
         assert!(app.confirm.is_some());
         app.cancel_confirm();
         assert!(app.confirm.is_none());
