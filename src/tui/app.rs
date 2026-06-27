@@ -119,16 +119,16 @@ impl App {
     }
 
     pub fn session_move_up(&mut self) {
-        let max = self.sessions.len().saturating_sub(1);
-        if self.session_selected < max {
-            self.session_selected += 1;
+        if self.session_selected > 0 {
+            self.session_selected -= 1;
             self.needs_session_commands_reload = true;
         }
     }
 
     pub fn session_move_down(&mut self) {
-        if self.session_selected > 0 {
-            self.session_selected -= 1;
+        let max = self.sessions.len().saturating_sub(1);
+        if self.session_selected < max {
+            self.session_selected += 1;
             self.needs_session_commands_reload = true;
         }
     }
@@ -382,50 +382,7 @@ mod tests {
     }
 
     #[test]
-    fn session_move_up_increases_index() {
-        let mut app = App::new();
-        app.sessions = vec![
-            SessionRow {
-                id: "s1".into(),
-                project: "p".into(),
-                started_at: 2000,
-                ended_at: 3000,
-                command_count: 0,
-                tags: vec![],
-            },
-            SessionRow {
-                id: "s2".into(),
-                project: "p".into(),
-                started_at: 1000,
-                ended_at: 2000,
-                command_count: 0,
-                tags: vec![],
-            },
-        ];
-        app.session_selected = 0;
-        app.session_move_up();
-        assert_eq!(app.session_selected, 1);
-        assert!(app.needs_session_commands_reload);
-    }
-
-    #[test]
-    fn session_move_up_clamps_at_max() {
-        let mut app = App::new();
-        app.sessions = vec![SessionRow {
-            id: "s1".into(),
-            project: "p".into(),
-            started_at: 2000,
-            ended_at: 3000,
-            command_count: 0,
-            tags: vec![],
-        }];
-        app.session_selected = 0;
-        app.session_move_up();
-        assert_eq!(app.session_selected, 0);
-    }
-
-    #[test]
-    fn session_move_down_decreases_index() {
+    fn session_move_up_decreases_index() {
         let mut app = App::new();
         app.sessions = vec![
             SessionRow {
@@ -446,13 +403,56 @@ mod tests {
             },
         ];
         app.session_selected = 1;
-        app.session_move_down();
+        app.session_move_up();
         assert_eq!(app.session_selected, 0);
         assert!(app.needs_session_commands_reload);
     }
 
     #[test]
-    fn session_move_down_clamps_at_zero() {
+    fn session_move_up_clamps_at_top() {
+        let mut app = App::new();
+        app.sessions = vec![SessionRow {
+            id: "s1".into(),
+            project: "p".into(),
+            started_at: 2000,
+            ended_at: 3000,
+            command_count: 0,
+            tags: vec![],
+        }];
+        app.session_selected = 0;
+        app.session_move_up();
+        assert_eq!(app.session_selected, 0);
+    }
+
+    #[test]
+    fn session_move_down_increases_index() {
+        let mut app = App::new();
+        app.sessions = vec![
+            SessionRow {
+                id: "s1".into(),
+                project: "p".into(),
+                started_at: 2000,
+                ended_at: 3000,
+                command_count: 0,
+                tags: vec![],
+            },
+            SessionRow {
+                id: "s2".into(),
+                project: "p".into(),
+                started_at: 1000,
+                ended_at: 2000,
+                command_count: 0,
+                tags: vec![],
+            },
+        ];
+        app.session_selected = 0;
+        app.session_move_down();
+        assert_eq!(app.session_selected, 1);
+        assert!(app.needs_session_commands_reload);
+    }
+
+    #[test]
+    fn session_move_down_clamps_at_bottom() {
         let mut app = App::new();
         app.sessions = vec![SessionRow {
             id: "s1".into(),
