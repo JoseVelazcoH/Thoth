@@ -3,7 +3,16 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser)]
-#[command(name = "tth", arg_required_else_help = false)]
+#[command(
+    name = "tth",
+    arg_required_else_help = false,
+    about = "Thoth: an intelligent shell history that captures commands with context",
+    long_about = "Thoth records every command you run along with its working directory, \
+project, exit code, duration, and any active tags. Run bare `tth` or press Ctrl-R \
+(after `tth install`) to open an interactive fuzzy search. Use `tth search` for \
+filtered, scriptable output. Manage your history with `tth sessions`, `tth forget`, \
+`tth export`, and `tth tags`."
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub cmd: Option<Cmd>,
@@ -11,152 +20,218 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Cmd {
+    #[command(about = "Record a command into history (invoked by the shell hooks, not by hand)")]
     Record(RecordArgs),
+    #[command(about = "Install the shell integration into your rc file")]
     Install(InstallArgs),
+    #[command(about = "Remove the shell integration from your rc file")]
     Uninstall(UninstallArgs),
+    #[command(about = "Show a quick status summary")]
     Status,
+    #[command(about = "Search history with filters and full-text")]
     Search(SearchArgs),
+    #[command(about = "List work sessions")]
     Sessions(SessionsArgs),
+    #[command(about = "Delete recent commands from history")]
     Forget(ForgetArgs),
+    #[command(about = "Export matching commands as a runnable bash script")]
     Export(ExportArgs),
+    #[command(about = "Print the shell integration script for eval (eval \"$(tth init zsh)\")")]
     Init(InitArgs),
+    #[command(about = "Print the export to activate a tag (used by the tth-tag shell function)")]
     Tag(TagArgs),
+    #[command(
+        about = "Print the export to deactivate a tag (used by the tth-untag shell function)"
+    )]
     Untag(UntagArgs),
+    #[command(about = "Show active tags, or all recorded tags with --list")]
     Tags(TagsArgs),
+    #[command(about = "Print prompt-integration instructions for your prompt framework")]
     Prompt(PromptArgs),
+    #[command(about = "Show history insights and statistics")]
     Stats(StatsArgs),
+    #[command(about = "Run diagnostics and suggest fixes")]
     Doctor,
-    #[command(hide = true)]
+    #[command(
+        hide = true,
+        about = "Generate a new session ID (invoked by the shell hooks, not by hand)"
+    )]
     NewSessionId,
 }
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct ForgetArgs {
-    #[arg(long, default_value_t = 1)]
+    #[arg(
+        long,
+        default_value_t = 1,
+        help = "Number of recent commands to forget"
+    )]
     pub last: usize,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Preview which commands would be deleted without deleting them"
+    )]
     pub dry_run: bool,
-    #[arg(long = "terminal-id")]
+    #[arg(
+        long = "terminal-id",
+        help = "Restrict to commands from this terminal session"
+    )]
     pub terminal_id: Option<String>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct RecordArgs {
-    #[arg(long)]
+    #[arg(long, help = "The command string to record")]
     pub cmd: String,
-    #[arg(long)]
+    #[arg(long, help = "Working directory where the command ran")]
     pub dir: Option<String>,
-    #[arg(long = "exit", default_value_t = 0)]
+    #[arg(long = "exit", default_value_t = 0, help = "Exit code of the command")]
     pub exit_code: i64,
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, help = "Command duration in milliseconds")]
     pub duration: i64,
-    #[arg(long)]
+    #[arg(long, help = "Unix timestamp when the command ran")]
     pub timestamp: Option<i64>,
-    #[arg(long, default_value = "[]")]
+    #[arg(long, default_value = "[]", help = "JSON array of active tag names")]
     pub tags: String,
-    #[arg(long = "terminal-id")]
+    #[arg(long = "terminal-id", help = "Identifier for the terminal session")]
     pub terminal_id: Option<String>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct InstallArgs {
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Shell to install for (bash or zsh; auto-detected if omitted)"
+    )]
     pub shell: Option<String>,
-    #[arg(long = "rc-file")]
+    #[arg(
+        long = "rc-file",
+        help = "Path to the rc file to modify (default: ~/.bashrc or ~/.zshrc)"
+    )]
     pub rc_file: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct SearchArgs {
+    #[arg(help = "Optional full-text search query")]
     pub query: Option<String>,
-    #[arg(short = 'p', long)]
+    #[arg(short = 'p', long, help = "Filter by project (directory basename)")]
     pub project: Option<String>,
-    #[arg(short = 't', long, action = clap::ArgAction::Append)]
+    #[arg(short = 't', long, action = clap::ArgAction::Append, help = "Filter by tag (repeatable)")]
     pub tag: Vec<String>,
-    #[arg(long)]
+    #[arg(long, help = "Filter by exit status: ok, fail, or any")]
     pub exit: Option<crate::search::ExitFilter>,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Filter by duration in seconds, e.g. >30 (over 30s) or <5 (under 5s)"
+    )]
     pub duration: Option<String>,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Show commands after this time, e.g. '2h ago' or '2024-01-01'"
+    )]
     pub since: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "Show commands before this time")]
     pub until: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "Filter by session ID")]
     pub session: Option<String>,
-    #[arg(long, default_value_t = 50)]
+    #[arg(long, default_value_t = 50, help = "Maximum number of results")]
     pub limit: usize,
-    #[arg(long = "show-session", default_value_t = false)]
+    #[arg(
+        long = "show-session",
+        default_value_t = false,
+        help = "Include session ID column in output"
+    )]
     pub show_session: bool,
 }
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct SessionsArgs {
-    #[arg(long)]
+    #[arg(long, help = "Filter sessions by project name")]
     pub project: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "Show sessions after this time")]
     pub since: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "Show sessions before this time")]
     pub until: Option<String>,
-    #[arg(long, default_value_t = 20)]
+    #[arg(
+        long,
+        default_value_t = 20,
+        help = "Maximum number of sessions to show"
+    )]
     pub limit: usize,
 }
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct ExportArgs {
-    #[arg(long)]
+    #[arg(long, help = "Export commands from this session ID")]
     pub session: Option<String>,
-    #[arg(short = 't', long, action = clap::ArgAction::Append)]
+    #[arg(short = 't', long, action = clap::ArgAction::Append, help = "Filter by tag (repeatable)")]
     pub tag: Vec<String>,
-    #[arg(short = 'p', long)]
+    #[arg(short = 'p', long, help = "Filter by project name")]
     pub project: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "Export commands after this time")]
     pub since: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "Filter by exit status: ok, fail, or any")]
     pub exit: Option<crate::search::ExitFilter>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct InitArgs {
+    #[arg(help = "Shell to generate integration for (bash or zsh; auto-detected if omitted)")]
     pub shell: Option<String>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct TagArgs {
+    #[arg(help = "Tag name to activate")]
     pub name: String,
 }
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct UntagArgs {
+    #[arg(help = "Tag name to deactivate")]
     pub name: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "Deactivate all tags at once")]
     pub all: bool,
 }
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct TagsArgs {
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Show all tags recorded in the database with command counts"
+    )]
     pub list: bool,
 }
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct PromptArgs {
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Prompt framework to generate for: starship, p10k, oh-my-posh, or generic"
+    )]
     pub framework: Option<String>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct StatsArgs {
-    #[arg(short = 'p', long)]
+    #[arg(short = 'p', long, help = "Restrict stats to this project")]
     pub project: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "Restrict stats to commands after this time")]
     pub since: Option<String>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct UninstallArgs {
-    #[arg(long = "keep-data")]
+    #[arg(
+        long = "keep-data",
+        help = "Suppress the data-retention reminder message"
+    )]
     pub keep_data: bool,
-    #[arg(long = "rc-file")]
+    #[arg(
+        long = "rc-file",
+        help = "Path to the rc file to modify (default: ~/.bashrc or ~/.zshrc)"
+    )]
     pub rc_file: Option<PathBuf>,
 }
 
