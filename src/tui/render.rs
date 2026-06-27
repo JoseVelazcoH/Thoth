@@ -145,7 +145,8 @@ fn tui_cell(col: &Column, row: &CommandRow, now: i64, width: u16) -> Cell<'stati
         Column::Exit => Style::default().fg(exit_text(row.exit_code).1),
         Column::Project => Style::default().fg(Color::Blue),
         Column::Directory => Style::default().fg(DIM_COLOR),
-        Column::Command | Column::Tags => Style::default(),
+        Column::Command => Style::default().fg(Color::Green),
+        Column::Tags => Style::default(),
     };
     Cell::from(Line::from(vec![Span::styled(text, style)]))
 }
@@ -167,9 +168,11 @@ pub fn resolve_tui_columns(names: &[String]) -> Vec<Column> {
 }
 
 fn render_tab_bar(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
-    let accent_style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
     let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
-    let active_style = accent_style.add_modifier(Modifier::REVERSED);
+    let active_style = Style::default()
+        .fg(Color::Green)
+        .add_modifier(Modifier::BOLD)
+        .add_modifier(Modifier::REVERSED);
 
     let (history_style, workspaces_style) = match app.tab {
         Tab::History => (active_style, dim_style),
@@ -287,7 +290,8 @@ fn render_history_pane(
     let table_header = Row::new(header_cells);
 
     let highlight_style = Style::default()
-        .add_modifier(Modifier::REVERSED)
+        .bg(ACCENT)
+        .fg(Color::Black)
         .add_modifier(Modifier::BOLD);
 
     let table = Table::new(rows, widths)
@@ -318,7 +322,8 @@ fn render_workspaces_pane(
 ) {
     let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
     let highlight_style = Style::default()
-        .add_modifier(Modifier::REVERSED)
+        .bg(ACCENT)
+        .fg(Color::Black)
         .add_modifier(Modifier::BOLD);
 
     let list_focused = app.ws_pane == WsPane::List;
@@ -498,9 +503,12 @@ pub fn draw_with_cmd_state(
     let version = env!("CARGO_PKG_VERSION");
     let accent_style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
     let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
+    let green_bold = Style::default()
+        .fg(Color::Green)
+        .add_modifier(Modifier::BOLD);
 
-    let accent_bar = Span::styled("▌ ", accent_style);
-    let name_span = Span::styled("Thoth", accent_style);
+    let accent_bar = Span::styled("▌ ", green_bold);
+    let name_span = Span::styled("Thoth", green_bold);
     let sep_span = Span::styled(" · ", dim_style);
     let version_span = Span::styled(format!("v{version}"), dim_style);
     let count_sep = Span::styled("  ", dim_style);
@@ -957,17 +965,11 @@ mod tests {
         let app = app_with_workspaces();
         let buf = render_app_buf(&app);
 
-        let any_reversed = (0..TEST_HEIGHT).any(|row_y| {
-            (0..TEST_WIDTH).any(|x| {
-                buf[(x, row_y)]
-                    .style()
-                    .add_modifier
-                    .contains(Modifier::REVERSED)
-            })
-        });
+        let any_cyan_bg = (0..TEST_HEIGHT)
+            .any(|row_y| (0..TEST_WIDTH).any(|x| buf[(x, row_y)].style().bg == Some(Color::Cyan)));
         assert!(
-            any_reversed,
-            "Workspaces tab must have REVERSED on selected row"
+            any_cyan_bg,
+            "Workspaces tab must have bg=Cyan on selected row"
         );
     }
 
@@ -1147,7 +1149,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_row_is_styled_reversed() {
+    fn selected_row_is_highlighted() {
         let mut app = App::new();
         app.all_rows = vec![
             make_row("first-cmd", TEST_NOW - 10, 0, "p"),
@@ -1158,17 +1160,11 @@ mod tests {
 
         let buf = render_app_buf(&app);
 
-        let any_reversed = (0..TEST_HEIGHT).any(|row_y| {
-            (0..TEST_WIDTH).any(|x| {
-                buf[(x, row_y)]
-                    .style()
-                    .add_modifier
-                    .contains(Modifier::REVERSED)
-            })
-        });
+        let any_cyan_bg = (0..TEST_HEIGHT)
+            .any(|row_y| (0..TEST_WIDTH).any(|x| buf[(x, row_y)].style().bg == Some(Color::Cyan)));
         assert!(
-            any_reversed,
-            "selected row must have REVERSED modifier somewhere in the frame"
+            any_cyan_bg,
+            "selected row must have bg=Cyan highlight somewhere in the frame"
         );
     }
 
@@ -1682,13 +1678,8 @@ mod tests {
         height: u16,
     ) -> Option<String> {
         for row in 0..height {
-            let any_reversed = (0..width).any(|col| {
-                buf[(col, row)]
-                    .style()
-                    .add_modifier
-                    .contains(Modifier::REVERSED)
-            });
-            if any_reversed {
+            let any_cyan_bg = (0..width).any(|col| buf[(col, row)].style().bg == Some(Color::Cyan));
+            if any_cyan_bg {
                 let line: String = (0..width)
                     .map(|col| buf[(col, row)].symbol().chars().next().unwrap_or(' '))
                     .collect();
