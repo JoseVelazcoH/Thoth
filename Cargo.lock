@@ -1042,6 +1042,7 @@ dependencies = [
  "nucleo-matcher",
  "predicates",
  "ratatui",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

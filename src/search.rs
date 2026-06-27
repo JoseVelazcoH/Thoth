@@ -1,9 +1,103 @@
 use std::cmp::Ordering;
 
 use comfy_table::{presets::UTF8_BORDERS_ONLY, Cell, Color, ContentArrangement, Table};
+use regex::Regex;
 use rusqlite::{Connection, ToSql};
 
 use crate::error::ThothError;
+
+#[derive(Debug)]
+pub enum Column {
+    Timestamp,
+    Project,
+    Tags,
+    Exit,
+    Duration,
+    Directory,
+    Command,
+}
+
+const ALL_COLUMN_NAMES: &[&str] = &[
+    "timestamp",
+    "project",
+    "tags",
+    "exit",
+    "duration",
+    "directory",
+    "command",
+];
+
+impl Column {
+    pub fn from_name(s: &str) -> Option<Column> {
+        match s {
+            "timestamp" => Some(Column::Timestamp),
+            "project" => Some(Column::Project),
+            "tags" => Some(Column::Tags),
+            "exit" => Some(Column::Exit),
+            "duration" => Some(Column::Duration),
+            "directory" => Some(Column::Directory),
+            "command" => Some(Column::Command),
+            _ => None,
+        }
+    }
+
+    pub fn header(&self) -> &'static str {
+        match self {
+            Column::Timestamp => "timestamp",
+            Column::Project => "project",
+            Column::Tags => "tags",
+            Column::Exit => "exit",
+            Column::Duration => "duration",
+            Column::Directory => "directory",
+            Column::Command => "command",
+        }
+    }
+
+    pub fn cell(&self, row: &CommandRow) -> Cell {
+        match self {
+            Column::Timestamp => Cell::new(fmt_timestamp(row.timestamp)),
+            Column::Project => Cell::new(&row.project),
+            Column::Tags => Cell::new(&row.tags),
+            Column::Exit => exit_cell(row.exit_code),
+            Column::Duration => Cell::new(fmt_duration(row.duration_ms)),
+            Column::Directory => Cell::new(&row.directory),
+            Column::Command => Cell::new(&row.command),
+        }
+    }
+}
+
+pub fn resolve_columns(names: &[String]) -> Result<Vec<Column>, ThothError> {
+    let mut cols = Vec::with_capacity(names.len());
+    for name in names {
+        match Column::from_name(name.as_str()) {
+            Some(c) => cols.push(c),
+            None => {
+                return Err(ThothError::Search(format!(
+                    "unknown column '{}'; valid columns: {}",
+                    name,
+                    ALL_COLUMN_NAMES.join(", ")
+                )))
+            }
+        }
+    }
+    Ok(cols)
+}
+
+pub fn compile_filters(patterns: &[String]) -> (Vec<Regex>, Vec<String>) {
+    let mut regexes = Vec::new();
+    let mut invalid = Vec::new();
+    for p in patterns {
+        match Regex::new(p) {
+            Ok(r) => regexes.push(r),
+            Err(_) => invalid.push(p.clone()),
+        }
+    }
+    (regexes, invalid)
+}
+
+pub fn is_filtered(command: &str, regexes: &[Regex]) -> bool {
+    regexes.iter().any(|r| r.is_match(command))
+}
 
 pub use crate::cli::SearchArgs;
 
@@ -243,7 +337,7 @@ pub fn execute(
     Ok(result)
 }
 
-pub fn render(rows: &[CommandRow], show_session: bool) -> String {
+pub fn render(rows: &[CommandRow], columns: &[Column], show_session: bool) -> String {
     if rows.is_empty() {
         return String::from("0 result(s)\n");
     }
@@ -251,33 +345,17 @@ pub fn render(rows: &[CommandRow], show_session: bool) -> String {
     if show_session {
         render_by_session(rows)
     } else {
-        render_table(rows)
+        render_table(rows, columns)
     }
 }
 
-fn render_table(rows: &[CommandRow]) -> String {
+fn render_table(rows: &[CommandRow], columns: &[Column]) -> String {
     let mut table = Table::new();
     table.load_preset(UTF8_BORDERS_ONLY);
     table.set_content_arrangement(ContentArrangement::Dynamic);
-    table.set_header(vec![
-        "timestamp",
-        "project",
-        "tags",
-        "exit",
-        "duration",
-        "directory",
-        "command",
-    ]);
+    table.set_header(columns.iter().map(|c| c.header()).collect::<Vec<_>>());
     for row in rows {
-        table.add_row(vec![
-            Cell::new(fmt_timestamp(row.timestamp)),
-            Cell::new(&row.project),
-            Cell::new(&row.tags),
-            exit_cell(row.exit_code),
-            Cell::new(fmt_duration(row.duration_ms)),
-            Cell::new(&row.directory),
-            Cell::new(&row.command),
-        ]);
+        table.add_row(columns.iter().map(|c| c.cell(row)).collect::<Vec<_>>());
     }
     format!("{table}\n{} result(s)\n", rows.len())
 }
@@ -845,10 +923,15 @@ mod tests {
         ]
     }
 
+    fn default_columns() -> Vec<Column> {
+        resolve_columns(&crate::config::default_search_columns()).unwrap()
+    }
+
     #[test]
     fn render_normal_contains_headers_and_commands() {
         let rows = fixture_rows();
-        let out = render(&rows, false);
+        let cols = default_columns();
+        let out = render(&rows, &cols, false);
         assert!(out.contains("timestamp"));
         assert!(out.contains("command"));
         assert!(out.contains("project"));
@@ -891,7 +974,7 @@ mod tests {
                 session_id: "session-bbb".into(),
             },
         ];
-        let out = render(&rows, true);
+        let out = render(&rows, &default_columns(), true);
         let headers_count = out.matches("---").count();
         assert!(headers_count >= 2, "expected two session header lines");
         let header_lines: Vec<&str> = out.lines().filter(|l| l.starts_with("---")).collect();
@@ -930,10 +1013,101 @@ mod tests {
 
     #[test]
     fn render_empty_rows_does_not_panic() {
-        let out = render(&[], false);
+        let cols = default_columns();
+        let out = render(&[], &cols, false);
         assert!(
             out.contains("0 result(s)"),
             "empty render must show '0 result(s)'; got: {out}"
         );
+    }
+
+    #[test]
+    fn compile_filters_valid_patterns_compile() {
+        let patterns = vec!["^secret".to_string(), "foo.*bar".to_string()];
+        let (regexes, invalid) = compile_filters(&patterns);
+        assert_eq!(regexes.len(), 2);
+        assert!(invalid.is_empty());
+    }
+
+    #[test]
+    fn compile_filters_invalid_pattern_returned_in_invalid_list() {
+        let patterns = vec!["^secret".to_string(), "[invalid".to_string()];
+        let (regexes, invalid) = compile_filters(&patterns);
+        assert_eq!(regexes.len(), 1);
+        assert_eq!(invalid.len(), 1);
+        assert_eq!(invalid[0], "[invalid");
+    }
+
+    #[test]
+    fn is_filtered_matches_when_pattern_matches() {
+        let (regexes, _) = compile_filters(&["^secret".to_string()]);
+        assert!(is_filtered("secret command", &regexes));
+    }
+
+    #[test]
+    fn is_filtered_does_not_match_when_no_pattern_matches() {
+        let (regexes, _) = compile_filters(&["^secret".to_string()]);
+        assert!(!is_filtered("ls -la", &regexes));
+    }
+
+    #[test]
+    fn is_filtered_empty_regexes_never_matches() {
+        assert!(!is_filtered("anything", &[]));
+    }
+
+    #[test]
+    fn resolve_columns_subset_returns_those_columns() {
+        let names = vec!["command".to_string(), "exit".to_string()];
+        let cols = resolve_columns(&names).unwrap();
+        assert_eq!(cols.len(), 2);
+        assert_eq!(cols[0].header(), "command");
+        assert_eq!(cols[1].header(), "exit");
+    }
+
+    #[test]
+    fn resolve_columns_unknown_name_returns_err_listing_valid_names() {
+        let names = vec!["typo".to_string()];
+        let err = resolve_columns(&names).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("typo"));
+        assert!(msg.contains("timestamp"));
+        assert!(msg.contains("command"));
+    }
+
+    #[test]
+    fn resolve_columns_default_returns_all_seven() {
+        let cols = default_columns();
+        assert_eq!(cols.len(), 7);
+    }
+
+    #[test]
+    fn render_with_subset_columns_shows_only_those_headers() {
+        let rows = fixture_rows();
+        let names = vec!["command".to_string(), "exit".to_string()];
+        let cols = resolve_columns(&names).unwrap();
+        let out = render(&rows, &cols, false);
+        assert!(out.contains("command"));
+        assert!(out.contains("exit"));
+        assert!(!out.contains("timestamp"));
+        assert!(!out.contains("project"));
+        assert!(!out.contains("tags"));
+        assert!(!out.contains("duration"));
+        assert!(!out.contains("directory"));
+    }
+
+    #[test]
+    fn is_filtered_integration_with_search_results() {
+        let conn = mem_conn();
+        seed(&conn, s("secret password", "p", 1_000, 0, 100, "[]", "s1"));
+        seed(&conn, s("ls -la", "p", 2_000, 0, 100, "[]", "s1"));
+        let args = default_args();
+        let rows = execute(&args, &conn, FIXED_NOW).unwrap();
+        let (regexes, _) = compile_filters(&["^secret".to_string()]);
+        let visible: Vec<_> = rows
+            .iter()
+            .filter(|r| !is_filtered(&r.command, &regexes))
+            .collect();
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].command, "ls -la");
     }
 }
