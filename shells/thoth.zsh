@@ -67,7 +67,7 @@ _tth_widget() {
         CURSOR=${#BUFFER}
         zle reset-prompt
     elif [[ "$out" == REPLAY:* ]]; then
-        BUFFER="bash ${out#REPLAY:}"
+        BUFFER="source ${out#REPLAY:}"
         zle reset-prompt
         zle accept-line
     else

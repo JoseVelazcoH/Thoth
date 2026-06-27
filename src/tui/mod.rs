@@ -171,8 +171,9 @@ pub fn run(
             .to_string();
         if std::io::stdout().is_terminal() {
             println!("Replaying workspace '{ws_name}'...");
-            std::process::Command::new("bash")
-                .arg(&path)
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string());
+            std::process::Command::new(shell)
+                .args(["-i", "-c", &format!("source '{path_str}'")])
                 .status()
                 .map_err(|e| ThothError::Tui(format!("replay run failed: {e}")))?;
         } else {

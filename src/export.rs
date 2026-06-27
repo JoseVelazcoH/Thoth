@@ -176,6 +176,7 @@ pub fn render_script(rows: &[ExportRow], meta: &ExportMeta<'_>, now: i64) -> Str
 pub fn render_replay_script(rows: &[ExportRow]) -> String {
     let mut out = String::new();
     out.push_str("#!/usr/bin/env bash\n");
+    out.push_str("(\n");
     out.push_str("set -e\n");
     for row in rows {
         let escaped_dir = row.directory.replace('\'', "'\\''");
@@ -183,6 +184,7 @@ pub fn render_replay_script(rows: &[ExportRow]) -> String {
         out.push_str(&row.command);
         out.push('\n');
     }
+    out.push_str(")\n");
     out
 }
 
@@ -670,9 +672,27 @@ mod tests {
         let rows: Vec<ExportRow> = vec![];
         let out = render_replay_script(&rows);
         let lines: Vec<&str> = out.lines().collect();
-        assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0], "#!/usr/bin/env bash");
-        assert_eq!(lines[1], "set -e");
+        assert_eq!(lines, vec!["#!/usr/bin/env bash", "(", "set -e", ")"]);
+    }
+
+    #[test]
+    fn render_replay_script_wraps_body_in_subshell() {
+        let rows = vec![ExportRow {
+            command: "z somewhere".into(),
+            directory: "/tmp".into(),
+            timestamp: 1_000,
+            exit_code: 0,
+            duration_ms: 100,
+        }];
+        let out = render_replay_script(&rows);
+        assert!(
+            out.contains("(\nset -e\n"),
+            "set -e inside the subshell; got:\n{out}"
+        );
+        assert!(
+            out.trim_end().ends_with(')'),
+            "body wrapped in a subshell; got:\n{out}"
+        );
     }
 
     #[test]
