@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use comfy_table::{Cell, Color, ContentArrangement, Table};
+use comfy_table::{presets::UTF8_BORDERS_ONLY, Cell, Color, ContentArrangement, Table};
 use rusqlite::{Connection, ToSql};
 
 use crate::error::ThothError;
@@ -257,6 +257,7 @@ pub fn render(rows: &[CommandRow], show_session: bool) -> String {
 
 fn render_table(rows: &[CommandRow]) -> String {
     let mut table = Table::new();
+    table.load_preset(UTF8_BORDERS_ONLY);
     table.set_content_arrangement(ContentArrangement::Dynamic);
     table.set_header(vec![
         "timestamp",
@@ -303,6 +304,7 @@ fn render_by_session(rows: &[CommandRow]) -> String {
             output.push_str(&header);
 
             let mut sub = Table::new();
+            sub.load_preset(UTF8_BORDERS_ONLY);
             sub.set_content_arrangement(ContentArrangement::Dynamic);
             sub.set_header(vec!["timestamp", "exit", "duration", "command"]);
             for r in group {

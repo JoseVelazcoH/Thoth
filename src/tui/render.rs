@@ -2,12 +2,14 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table},
+    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState},
     Frame,
 };
 
 use crate::tui::app::App;
 use crate::tui::time::format_relative;
+
+pub const BOTTOM_ANCHORED: bool = true;
 
 pub fn display_command(raw: &str) -> String {
     let collapsed: String = raw
@@ -89,7 +91,7 @@ const ACCENT: Color = Color::Cyan;
 const DIM_COLOR: Color = Color::DarkGray;
 const BORDER_COLOR: Color = Color::DarkGray;
 
-pub fn draw(frame: &mut Frame, app: &App, now: i64) {
+pub fn draw(frame: &mut Frame, app: &App, now: i64, table_state: &mut TableState) {
     let area = frame.area();
 
     let chunks = Layout::vertical([
@@ -172,51 +174,22 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
     let fixed: u16 = time_w + dur_w + exit_w + proj_w + gaps;
     let cmd_w: u16 = inner_list_area.width.saturating_sub(fixed);
 
-    let height = inner_list_area.height as usize;
-
-    let visible: Vec<usize> = if app.filtered.is_empty() {
-        vec![]
-    } else {
-        let total = app.filtered.len();
-        let scroll = app.scroll.min(total.saturating_sub(1));
-        let end = (scroll + height).min(total);
-        (scroll..end).collect()
-    };
-
-    let selected_in_visible = if visible.is_empty() {
-        None
-    } else {
-        let scroll = app.scroll.min(app.filtered.len().saturating_sub(1));
-        if app.selected >= scroll && app.selected < scroll + visible.len() {
-            Some(app.selected - scroll)
-        } else {
-            None
-        }
-    };
-
     let dim = Style::default().fg(DIM_COLOR);
     let cyan = Style::default().fg(ACCENT);
     let blue = Style::default().fg(Color::Blue);
 
-    let rows: Vec<Row> = visible
+    let rows: Vec<Row> = app
+        .filtered
         .iter()
-        .enumerate()
-        .map(|(vi, &fi)| {
-            let row = &app.all_rows[app.filtered[fi]];
+        .rev()
+        .map(|&fi| {
+            let row = &app.all_rows[fi];
             let rel = format_relative(row.timestamp, now);
             let dur = format_duration(row.duration_ms);
             let (exit_label, exit_color) = exit_text(row.exit_code);
             let proj = truncate(&row.project, proj_w as usize);
             let cmd = display_command(&row.command);
             let cmd = truncate(&cmd, cmd_w as usize);
-
-            let row_style = if Some(vi) == selected_in_visible {
-                Style::default()
-                    .add_modifier(Modifier::REVERSED)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
 
             let time_cell = Cell::from(Line::from(vec![Span::styled(rel, dim)]));
             let dur_cell = Cell::from(Line::from(vec![Span::styled(dur, cyan)]));
@@ -227,7 +200,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
             let proj_cell = Cell::from(Line::from(vec![Span::styled(proj, blue)]));
             let cmd_cell = Cell::from(Line::from(vec![Span::raw(cmd)]));
 
-            Row::new([time_cell, dur_cell, exit_cell, proj_cell, cmd_cell]).style(row_style)
+            Row::new([time_cell, dur_cell, exit_cell, proj_cell, cmd_cell])
         })
         .collect();
 
@@ -239,8 +212,21 @@ pub fn draw(frame: &mut Frame, app: &App, now: i64) {
         Constraint::Min(1),
     ];
 
-    let table = Table::new(rows, widths).block(Block::default());
-    frame.render_widget(table, inner_list_area);
+    let highlight_style = Style::default()
+        .add_modifier(Modifier::REVERSED)
+        .add_modifier(Modifier::BOLD);
+
+    let table = Table::new(rows, widths)
+        .block(Block::default())
+        .row_highlight_style(highlight_style);
+
+    if app.filtered.is_empty() {
+        table_state.select(None);
+    } else {
+        let display_idx = app.filtered.len() - 1 - app.selected;
+        table_state.select(Some(display_idx));
+    }
+    frame.render_stateful_widget(table, inner_list_area, table_state);
 
     let query_text = format!("> {}", app.query);
     let query_widget = Paragraph::new(query_text);
@@ -294,7 +280,8 @@ mod tests {
     fn render_app(app: &App) -> String {
         let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, app, TEST_NOW)).unwrap();
+        let mut ts = TableState::default();
+        terminal.draw(|f| draw(f, app, TEST_NOW, &mut ts)).unwrap();
         let buf = terminal.backend().buffer().clone();
         let mut lines: Vec<String> = Vec::new();
         for row in 0..TEST_HEIGHT {
@@ -399,17 +386,22 @@ mod tests {
 
         let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &app, TEST_NOW)).unwrap();
+        let mut ts = TableState::default();
+        terminal.draw(|f| draw(f, &app, TEST_NOW, &mut ts)).unwrap();
         let buf = terminal.backend().buffer().clone();
 
-        let row1_y = 2u16;
-        let any_reversed = (0..TEST_WIDTH).any(|x| {
-            buf[(x, row1_y)]
-                .style()
-                .add_modifier
-                .contains(Modifier::REVERSED)
+        let any_reversed = (0..TEST_HEIGHT).any(|row_y| {
+            (0..TEST_WIDTH).any(|x| {
+                buf[(x, row_y)]
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::REVERSED)
+            })
         });
-        assert!(any_reversed, "selected row must have REVERSED modifier");
+        assert!(
+            any_reversed,
+            "selected row must have REVERSED modifier somewhere in the frame"
+        );
     }
 
     #[test]
@@ -491,7 +483,8 @@ mod tests {
         let app = app_with_rows();
         let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &app, TEST_NOW)).unwrap();
+        let mut ts = TableState::default();
+        terminal.draw(|f| draw(f, &app, TEST_NOW, &mut ts)).unwrap();
         let buf = terminal.backend().buffer().clone();
 
         let reversed_count = (0..TEST_WIDTH)
@@ -531,6 +524,37 @@ mod tests {
         assert!(
             text.contains("git status --short"),
             "collapsed command must appear as single line; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn scroll_brings_selected_row_into_view() {
+        const SMALL_HEIGHT: u16 = 8;
+        const SMALL_WIDTH: u16 = 80;
+        let mut app = App::new();
+        app.all_rows = (0..20)
+            .map(|i| make_row(&format!("cmd-row-{i:02}"), TEST_NOW - i * 60, 0, "p"))
+            .collect();
+        app.recompute();
+        app.selected = 15;
+
+        let backend = TestBackend::new(SMALL_WIDTH, SMALL_HEIGHT);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ts = TableState::default();
+        terminal.draw(|f| draw(f, &app, TEST_NOW, &mut ts)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        let mut full_text = String::new();
+        for row in 0..SMALL_HEIGHT {
+            for col in 0..SMALL_WIDTH {
+                full_text.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+            }
+            full_text.push('\n');
+        }
+
+        assert!(
+            full_text.contains("cmd-row-15"),
+            "selected row 15 must be visible after scroll; buffer:\n{full_text}"
         );
     }
 
@@ -595,5 +619,460 @@ mod tests {
     #[test]
     fn display_command_plain_command_unchanged() {
         assert_eq!(display_command("ls -la"), "ls -la");
+    }
+
+    #[test]
+    fn dump_bottom_anchored_buffers() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let mut app = App::new();
+        app.all_rows = vec![
+            make_row("cmd-newest", TEST_NOW - 10, 0, "proj"),
+            make_row("cmd-newer", TEST_NOW - 60, 0, "proj"),
+            make_row("cmd-middle", TEST_NOW - 300, 0, "proj"),
+            make_row("cmd-older", TEST_NOW - 1200, 0, "proj"),
+            make_row("cmd-oldest", TEST_NOW - 3600, 0, "proj"),
+        ];
+        app.recompute();
+
+        let (default_buf, _) = render_app_small(&app, 80, 8);
+        println!("=== DEFAULT (newest at bottom, cursor on newest) ===");
+        println!("{default_buf}");
+
+        let up_key = KeyEvent {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        for _ in 0..3 {
+            handle_key(up_key, &mut app);
+        }
+
+        let (after_up3, _) = render_app_small(&app, 80, 8);
+        println!("\n=== AFTER Up x3 (cursor on cmd-older) ===");
+        println!("{after_up3}");
+
+        assert!(default_buf.contains("cmd-newest"));
+        assert!(after_up3.contains("cmd-older"));
+    }
+
+    fn app_bottom_anchored() -> App {
+        let mut app = App::new();
+        app.all_rows = vec![
+            make_row("newest-cmd", TEST_NOW - 60, 0, "p"),
+            make_row("middle-cmd", TEST_NOW - 3600, 0, "p"),
+            make_row("oldest-cmd", TEST_NOW - 7200, 0, "p"),
+        ];
+        app.recompute();
+        app
+    }
+
+    fn render_app_small(app: &App, width: u16, height: u16) -> (String, ratatui::buffer::Buffer) {
+        let mut ts = TableState::default();
+        render_app_small_with_state(app, width, height, &mut ts)
+    }
+
+    fn render_app_small_with_state(
+        app: &App,
+        width: u16,
+        height: u16,
+        ts: &mut TableState,
+    ) -> (String, ratatui::buffer::Buffer) {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, app, TEST_NOW, ts)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut lines: Vec<String> = Vec::new();
+        for row in 0..height {
+            let mut line = String::new();
+            for col in 0..width {
+                line.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+            }
+            lines.push(line.trim_end().to_string());
+        }
+        (lines.join("\n"), buf)
+    }
+
+    fn row_y_of(text: &str, buf: &ratatui::buffer::Buffer, width: u16, height: u16) -> Option<u16> {
+        for row in 0..height {
+            let line: String = (0..width)
+                .map(|col| buf[(col, row)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if line.contains(text) {
+                return Some(row);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn bottom_anchored_flag_is_true() {
+        const { assert!(BOTTOM_ANCHORED, "orientation must be bottom-anchored") };
+    }
+
+    #[test]
+    fn newest_command_renders_below_oldest() {
+        let app = app_bottom_anchored();
+        let (_, buf) = render_app_small(&app, TEST_WIDTH, TEST_HEIGHT);
+        let newest_y = row_y_of("newest-cmd", &buf, TEST_WIDTH, TEST_HEIGHT)
+            .expect("newest-cmd must appear in buffer");
+        let oldest_y = row_y_of("oldest-cmd", &buf, TEST_WIDTH, TEST_HEIGHT)
+            .expect("oldest-cmd must appear in buffer");
+        assert!(
+            newest_y > oldest_y,
+            "newest command must appear on a lower (higher y) row than oldest; newest_y={newest_y} oldest_y={oldest_y}"
+        );
+    }
+
+    #[test]
+    fn default_selection_is_newest_command() {
+        let app = app_bottom_anchored();
+        let cmd = app.selected_command().expect("must have a selection");
+        assert_eq!(
+            cmd, "newest-cmd",
+            "default selection must be the most-recent command"
+        );
+    }
+
+    #[test]
+    fn up_key_moves_to_older_command() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let mut app = app_bottom_anchored();
+        assert_eq!(app.selected_command(), Some("newest-cmd"));
+
+        handle_key(
+            KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            },
+            &mut app,
+        );
+        assert_eq!(
+            app.selected_command(),
+            Some("middle-cmd"),
+            "Up from newest must select middle (older) command"
+        );
+    }
+
+    #[test]
+    fn down_key_moves_to_newer_command() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let mut app = app_bottom_anchored();
+        handle_key(
+            KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            },
+            &mut app,
+        );
+        assert_eq!(app.selected_command(), Some("middle-cmd"));
+
+        handle_key(
+            KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            },
+            &mut app,
+        );
+        assert_eq!(
+            app.selected_command(),
+            Some("newest-cmd"),
+            "Down from middle must go back to newest"
+        );
+    }
+
+    #[test]
+    fn up_cannot_go_past_oldest() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let mut app = app_bottom_anchored();
+        let up_key = KeyEvent {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        for _ in 0..10 {
+            handle_key(up_key, &mut app);
+        }
+        assert_eq!(
+            app.selected_command(),
+            Some("oldest-cmd"),
+            "Up cannot go past the oldest command"
+        );
+    }
+
+    #[test]
+    fn down_cannot_go_past_newest() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let mut app = app_bottom_anchored();
+        let down_key = KeyEvent {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        for _ in 0..10 {
+            handle_key(down_key, &mut app);
+        }
+        assert_eq!(
+            app.selected_command(),
+            Some("newest-cmd"),
+            "Down cannot go past the newest command"
+        );
+    }
+
+    #[test]
+    fn bottom_anchored_scroll_keeps_older_row_visible() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        const H: u16 = 8;
+        const W: u16 = 80;
+        let mut app = App::new();
+        app.all_rows = (0..20)
+            .map(|i| make_row(&format!("scmd-{i:02}"), TEST_NOW - i as i64 * 60, 0, "p"))
+            .collect();
+        app.recompute();
+
+        let up_key = KeyEvent {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        for _ in 0..15 {
+            handle_key(up_key, &mut app);
+        }
+
+        let (_, buf) = render_app_small(&app, W, H);
+        let mut full_text = String::new();
+        for row in 0..H {
+            for col in 0..W {
+                full_text.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+            }
+            full_text.push('\n');
+        }
+        assert!(
+            full_text.contains("scmd-15"),
+            "after pressing Up 15 times, selected older row must be visible; buffer:\n{full_text}"
+        );
+    }
+
+    #[test]
+    fn dump_persistent_scroll_sequence() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        const W: u16 = 80;
+        const H: u16 = 9;
+
+        let mut app = App::new();
+        app.all_rows = (0..12)
+            .map(|i| make_row(&format!("nav-{i:02}"), TEST_NOW - i as i64 * 60, 0, "p"))
+            .collect();
+        app.recompute();
+
+        let up_key = KeyEvent {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+
+        let mut ts = TableState::default();
+
+        let (s0, _) = render_app_small_with_state(&app, W, H, &mut ts);
+        println!("=== FRAME 0 (default, newest=nav-00 at bottom, highlighted) ===\n{s0}");
+
+        handle_key(up_key, &mut app);
+        let (s1, _) = render_app_small_with_state(&app, W, H, &mut ts);
+        println!("\n=== FRAME 1 (Up x1 - cursor moves UP within viewport, no scroll) ===\n{s1}");
+
+        handle_key(up_key, &mut app);
+        let (s2, _) = render_app_small_with_state(&app, W, H, &mut ts);
+        println!("\n=== FRAME 2 (Up x2 - cursor moves UP within viewport, no scroll) ===\n{s2}");
+
+        handle_key(up_key, &mut app);
+        handle_key(up_key, &mut app);
+        handle_key(up_key, &mut app);
+        handle_key(up_key, &mut app);
+        handle_key(up_key, &mut app);
+        handle_key(up_key, &mut app);
+        let (s8, _) = render_app_small_with_state(&app, W, H, &mut ts);
+        println!("\n=== FRAME 8 (Up x8 - content has scrolled, older commands visible) ===\n{s8}");
+    }
+
+    fn visible_commands(buf: &ratatui::buffer::Buffer, width: u16, height: u16) -> Vec<String> {
+        let mut seen = Vec::new();
+        for row in 0..height {
+            let line: String = (0..width)
+                .map(|col| buf[(col, row)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            for i in 0..12u32 {
+                let name = format!("nav-{i:02}");
+                if line.contains(&name) && !seen.contains(&name) {
+                    seen.push(name);
+                }
+            }
+        }
+        seen
+    }
+
+    fn highlighted_command(
+        buf: &ratatui::buffer::Buffer,
+        width: u16,
+        height: u16,
+    ) -> Option<String> {
+        for row in 0..height {
+            let any_reversed = (0..width).any(|col| {
+                buf[(col, row)]
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::REVERSED)
+            });
+            if any_reversed {
+                let line: String = (0..width)
+                    .map(|col| buf[(col, row)].symbol().chars().next().unwrap_or(' '))
+                    .collect();
+                for i in 0..12u32 {
+                    let name = format!("nav-{i:02}");
+                    if line.contains(&name) {
+                        return Some(name);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn persistent_state_cursor_moves_before_scroll() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        const W: u16 = 80;
+        const H: u16 = 9;
+
+        let mut app = App::new();
+        app.all_rows = (0..12)
+            .map(|i| make_row(&format!("nav-{i:02}"), TEST_NOW - i as i64 * 60, 0, "p"))
+            .collect();
+        app.recompute();
+
+        let up_key = KeyEvent {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+
+        let mut ts = TableState::default();
+
+        let (_, buf0) = render_app_small_with_state(&app, W, H, &mut ts);
+        let visible0 = visible_commands(&buf0, W, H);
+        let highlighted0 = highlighted_command(&buf0, W, H);
+
+        handle_key(up_key, &mut app);
+        let (_, buf1) = render_app_small_with_state(&app, W, H, &mut ts);
+        let visible1 = visible_commands(&buf1, W, H);
+        let highlighted1 = highlighted_command(&buf1, W, H);
+
+        handle_key(up_key, &mut app);
+        let (_, buf2) = render_app_small_with_state(&app, W, H, &mut ts);
+        let visible2 = visible_commands(&buf2, W, H);
+        let highlighted2 = highlighted_command(&buf2, W, H);
+
+        assert!(
+            highlighted0.is_some(),
+            "must have a highlighted row at the start"
+        );
+        assert!(
+            highlighted1.is_some(),
+            "must have a highlighted row after Up x1"
+        );
+        assert!(
+            highlighted2.is_some(),
+            "must have a highlighted row after Up x2"
+        );
+
+        assert_ne!(
+            highlighted0, highlighted1,
+            "highlight must change after Up x1: before={highlighted0:?} after={highlighted1:?}"
+        );
+        assert_ne!(
+            highlighted1, highlighted2,
+            "highlight must change after Up x2: before={highlighted1:?} after={highlighted2:?}"
+        );
+
+        assert_eq!(
+            visible0, visible1,
+            "visible set must NOT change on the first Up press (cursor moves within viewport, no scroll yet)"
+        );
+
+        assert_eq!(
+            visible1, visible2,
+            "visible set must NOT change on the second Up press (still within viewport)"
+        );
+    }
+
+    #[test]
+    fn persistent_state_scrolls_only_at_viewport_edge() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        const W: u16 = 80;
+        const H: u16 = 9;
+
+        let mut app = App::new();
+        app.all_rows = (0..12)
+            .map(|i| make_row(&format!("nav-{i:02}"), TEST_NOW - i as i64 * 60, 0, "p"))
+            .collect();
+        app.recompute();
+
+        let up_key = KeyEvent {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+
+        let mut ts = TableState::default();
+        let (_, buf_start) = render_app_small_with_state(&app, W, H, &mut ts);
+        let visible_start = visible_commands(&buf_start, W, H);
+
+        for _ in 0..8 {
+            handle_key(up_key, &mut app);
+            render_app_small_with_state(&app, W, H, &mut ts);
+        }
+
+        let (_, buf_end) = render_app_small_with_state(&app, W, H, &mut ts);
+        let visible_end = visible_commands(&buf_end, W, H);
+
+        assert_ne!(
+            visible_start, visible_end,
+            "after pressing Up enough times to leave the viewport, the visible set must have changed (scroll occurred)"
+        );
+
+        let highlighted_end = highlighted_command(&buf_end, W, H);
+        assert!(
+            highlighted_end.is_some(),
+            "selected row must be highlighted and visible after scrolling"
+        );
     }
 }

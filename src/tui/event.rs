@@ -143,35 +143,56 @@ mod tests {
     }
 
     #[test]
-    fn up_arrow_moves_selection_up() {
+    fn up_arrow_moves_to_older_command() {
         let mut app = app_with_rows();
-        app.selected = 1;
+        app.selected = 0;
+        let cmd_before = app.selected_command().map(str::to_string);
         handle_key(key(KeyCode::Up), &mut app);
-        assert_eq!(app.selected, 0);
+        let cmd_after = app.selected_command().map(str::to_string);
+        assert_ne!(cmd_before, cmd_after, "Up must change the selected command");
+        assert_eq!(
+            app.selected, 1,
+            "Up increases selected index toward older row"
+        );
     }
 
     #[test]
-    fn down_arrow_moves_selection_down() {
-        let mut app = app_with_rows();
-        app.selected = 0;
-        handle_key(key(KeyCode::Down), &mut app);
-        assert_eq!(app.selected, 1);
-    }
-
-    #[test]
-    fn ctrl_p_moves_selection_up() {
+    fn down_arrow_moves_to_newer_command() {
         let mut app = app_with_rows();
         app.selected = 1;
-        handle_key(ctrl(KeyCode::Char('p')), &mut app);
-        assert_eq!(app.selected, 0);
+        let cmd_before = app.selected_command().map(str::to_string);
+        handle_key(key(KeyCode::Down), &mut app);
+        let cmd_after = app.selected_command().map(str::to_string);
+        assert_ne!(
+            cmd_before, cmd_after,
+            "Down must change the selected command"
+        );
+        assert_eq!(
+            app.selected, 0,
+            "Down decreases selected index toward newer row"
+        );
     }
 
     #[test]
-    fn ctrl_n_moves_selection_down() {
+    fn ctrl_p_moves_to_older_command() {
         let mut app = app_with_rows();
         app.selected = 0;
+        handle_key(ctrl(KeyCode::Char('p')), &mut app);
+        assert_eq!(
+            app.selected, 1,
+            "Ctrl-P increases selected index toward older row"
+        );
+    }
+
+    #[test]
+    fn ctrl_n_moves_to_newer_command() {
+        let mut app = app_with_rows();
+        app.selected = 1;
         handle_key(ctrl(KeyCode::Char('n')), &mut app);
-        assert_eq!(app.selected, 1);
+        assert_eq!(
+            app.selected, 0,
+            "Ctrl-N decreases selected index toward newer row"
+        );
     }
 
     #[test]
@@ -216,18 +237,18 @@ mod tests {
     }
 
     #[test]
-    fn up_at_top_is_noop() {
+    fn up_at_oldest_is_noop() {
         let mut app = app_with_rows();
-        app.selected = 0;
+        app.selected = 1;
         handle_key(key(KeyCode::Up), &mut app);
-        assert_eq!(app.selected, 0);
+        assert_eq!(app.selected, 1, "Up at oldest row must not go further");
     }
 
     #[test]
-    fn down_at_bottom_is_noop() {
+    fn down_at_newest_is_noop() {
         let mut app = app_with_rows();
-        app.selected = 1;
+        app.selected = 0;
         handle_key(key(KeyCode::Down), &mut app);
-        assert_eq!(app.selected, 1);
+        assert_eq!(app.selected, 0, "Down at newest row must not go further");
     }
 }

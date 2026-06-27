@@ -12,7 +12,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{backend::CrosstermBackend, widgets::TableState, Terminal};
 use rusqlite::Connection;
 
 use crate::error::ThothError;
@@ -68,10 +68,11 @@ pub fn run(conn: &Connection, now: i64) -> Result<(), ThothError> {
 
     let mut app = App::new();
     app.reload(conn, now)?;
+    let mut table_state = TableState::default();
 
     loop {
         terminal
-            .draw(|f| render::draw(f, &app, now))
+            .draw(|f| render::draw(f, &app, now, &mut table_state))
             .map_err(|e| ThothError::Tui(format!("draw failed: {e}")))?;
 
         if ct_event::poll(std::time::Duration::from_millis(200))
