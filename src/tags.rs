@@ -195,11 +195,11 @@ mod tests {
         };
         let mut a1 = args_base.clone();
         a1.timestamp = Some(1001);
-        crate::recorder::record_inner(&a1, &mut conn).unwrap();
+        crate::recorder::record_inner(&a1, 30, &mut conn).unwrap();
         let mut a2 = args_base.clone();
         a2.timestamp = Some(1002);
         a2.tags = r#"["fix"]"#.into();
-        crate::recorder::record_inner(&a2, &mut conn).unwrap();
+        crate::recorder::record_inner(&a2, 30, &mut conn).unwrap();
 
         let tags = list_db_tags(&conn).unwrap();
         assert_eq!(tags[0], ("fix".to_string(), 2));

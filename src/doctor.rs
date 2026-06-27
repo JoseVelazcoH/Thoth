@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::prompt::{prompt_snippet, PromptFramework};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,6 +27,8 @@ pub struct DoctorInputs {
     pub tth_on_path: bool,
     pub framework: PromptFramework,
     pub framework_config_text: Option<String>,
+    pub config_path: PathBuf,
+    pub config_present: bool,
 }
 
 pub struct DbInfo {
@@ -92,6 +96,17 @@ pub fn run_doctor(inputs: &DoctorInputs) -> DoctorReport {
     let prompt_check =
         check_prompt_visibility(&inputs.framework, inputs.framework_config_text.as_deref());
     checks.push(prompt_check);
+
+    let status_str = if inputs.config_present {
+        "present"
+    } else {
+        "absent"
+    };
+    checks.push(Check {
+        status: CheckStatus::Ok,
+        name: format!("config  {} ({})", inputs.config_path.display(), status_str),
+        guidance: None,
+    });
 
     DoctorReport { checks }
 }
@@ -173,6 +188,8 @@ mod tests {
             tth_on_path: tth,
             framework,
             framework_config_text: config.map(|s| s.to_string()),
+            config_path: std::path::PathBuf::from("/home/user/.config/thoth/config.toml"),
+            config_present: false,
         }
     }
 
@@ -228,7 +245,11 @@ mod tests {
         let config = "[env_var.thoth_tags]\nvariable = \"TTH_PROMPT_TAGS\"";
         let inputs = make_inputs(true, true, true, PromptFramework::Starship, Some(config));
         let report = run_doctor(&inputs);
-        let prompt_check = report.checks.last().unwrap();
+        let prompt_check = report
+            .checks
+            .iter()
+            .find(|c| c.name.contains("prompt tags"))
+            .unwrap();
         assert_eq!(prompt_check.status, CheckStatus::Ok);
     }
 
@@ -237,7 +258,11 @@ mod tests {
         let config = "[character]\nsuccess_symbol = \"[>](bold green)\"";
         let inputs = make_inputs(true, true, true, PromptFramework::Starship, Some(config));
         let report = run_doctor(&inputs);
-        let prompt_check = report.checks.last().unwrap();
+        let prompt_check = report
+            .checks
+            .iter()
+            .find(|c| c.name.contains("prompt tags"))
+            .unwrap();
         assert_eq!(prompt_check.status, CheckStatus::Warn);
         let guidance = prompt_check.guidance.as_deref().unwrap_or("");
         assert!(guidance.contains("env_var.thoth_tags"));
@@ -247,7 +272,11 @@ mod tests {
     fn prompt_warn_for_generic_is_advisory() {
         let inputs = make_inputs(true, true, true, PromptFramework::Generic, None);
         let report = run_doctor(&inputs);
-        let prompt_check = report.checks.last().unwrap();
+        let prompt_check = report
+            .checks
+            .iter()
+            .find(|c| c.name.contains("prompt tags"))
+            .unwrap();
         assert_eq!(prompt_check.status, CheckStatus::Warn);
     }
 

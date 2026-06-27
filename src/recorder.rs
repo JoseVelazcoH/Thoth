@@ -21,7 +21,11 @@ pub fn normalize_tags(raw: &str) -> String {
     }
 }
 
-pub fn record_inner(args: &RecordArgs, conn: &mut Connection) -> Result<(), ThothError> {
+pub fn record_inner(
+    args: &RecordArgs,
+    gap_minutes: i64,
+    conn: &mut Connection,
+) -> Result<(), ThothError> {
     let tags = normalize_tags(&args.tags);
     let directory = args.dir.clone().unwrap_or_else(|| {
         std::env::current_dir()
@@ -39,7 +43,7 @@ pub fn record_inner(args: &RecordArgs, conn: &mut Connection) -> Result<(), Thot
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
     let project = infer_project(&directory, &tx)?;
-    let sid = get_or_create(&project, timestamp, &tx)?;
+    let sid = get_or_create(&project, timestamp, gap_minutes, &tx)?;
 
     tx.execute(
         "INSERT INTO commands(command, directory, project, session_id, timestamp, exit_code, duration_ms, tags, terminal_id) \
@@ -72,8 +76,8 @@ pub fn record_inner(args: &RecordArgs, conn: &mut Connection) -> Result<(), Thot
     Ok(())
 }
 
-pub fn record(args: &RecordArgs, conn: &mut Connection) {
-    match record_inner(args, conn) {
+pub fn record(args: &RecordArgs, gap_minutes: i64, conn: &mut Connection) {
+    match record_inner(args, gap_minutes, conn) {
         Ok(()) => {}
         Err(ThothError::Sqlite(ref e))
             if matches!(
@@ -93,7 +97,7 @@ pub fn record(args: &RecordArgs, conn: &mut Connection) {
                 )
             ) =>
         {
-            match record_inner(args, conn) {
+            match record_inner(args, gap_minutes, conn) {
                 Ok(()) => {}
                 Err(e) => log_error(&e.to_string()),
             }
@@ -108,6 +112,8 @@ mod tests {
     use crate::cli::RecordArgs;
     use rusqlite::Connection;
     use tempfile::TempDir;
+
+    const DEFAULT_GAP: i64 = 30;
 
     fn mem_conn() -> Connection {
         let mut c = crate::database::connect_memory().unwrap();
@@ -139,7 +145,7 @@ mod tests {
             terminal_id: Some(String::from("abc")),
             ..base_args()
         };
-        record_inner(&args, &mut conn).unwrap();
+        record_inner(&args, DEFAULT_GAP, &mut conn).unwrap();
         let val: Option<String> = conn
             .query_row(
                 "SELECT terminal_id FROM commands WHERE command='echo hi'",
@@ -154,7 +160,7 @@ mod tests {
     fn terminal_id_null_when_omitted() {
         let mut conn = mem_conn();
         let args = base_args();
-        record_inner(&args, &mut conn).unwrap();
+        record_inner(&args, DEFAULT_GAP, &mut conn).unwrap();
         let val: Option<String> = conn
             .query_row(
                 "SELECT terminal_id FROM commands WHERE command='echo hi'",
@@ -189,7 +195,7 @@ mod tests {
     fn successful_record_inserts_row() {
         let mut conn = mem_conn();
         let args = base_args();
-        record_inner(&args, &mut conn).unwrap();
+        record_inner(&args, DEFAULT_GAP, &mut conn).unwrap();
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM commands WHERE command='echo hi'",
@@ -222,7 +228,7 @@ mod tests {
             tags: String::from("[]"),
             terminal_id: None,
         };
-        record_inner(&args, &mut conn).unwrap();
+        record_inner(&args, DEFAULT_GAP, &mut conn).unwrap();
         let count: i64 = conn
             .query_row(
                 "SELECT command_count FROM projects WHERE path=?1",
@@ -237,7 +243,7 @@ mod tests {
     fn session_updated_after_record() {
         let mut conn = mem_conn();
         let args = base_args();
-        record_inner(&args, &mut conn).unwrap();
+        record_inner(&args, DEFAULT_GAP, &mut conn).unwrap();
         let (ended_at, count): (i64, i64) = conn
             .query_row("SELECT ended_at, command_count FROM sessions", [], |r| {
                 Ok((r.get(0)?, r.get(1)?))
@@ -258,7 +264,7 @@ mod tests {
         conn2.execute("BEGIN IMMEDIATE", []).unwrap();
 
         let args = base_args();
-        let result = record_inner(&args, &mut conn);
+        let result = record_inner(&args, DEFAULT_GAP, &mut conn);
 
         drop(conn2);
 
@@ -284,7 +290,7 @@ mod tests {
         conn.execute_batch("DROP TABLE commands;").unwrap();
 
         let args = base_args();
-        record(&args, &mut conn);
+        record(&args, DEFAULT_GAP, &mut conn);
 
         let log = std::fs::read_to_string(&log_path).unwrap_or_default();
         assert!(!log.is_empty(), "error was not logged");
@@ -301,7 +307,7 @@ mod tests {
         blocker.execute("BEGIN IMMEDIATE", []).unwrap();
 
         let args = base_args();
-        record(&args, &mut conn);
+        record(&args, DEFAULT_GAP, &mut conn);
 
         drop(blocker);
 

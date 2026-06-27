@@ -44,7 +44,7 @@ impl Drop for TerminalGuard {
     }
 }
 
-pub fn run(conn: &Connection, now: i64) -> Result<(), ThothError> {
+pub fn run(conn: &Connection, now: i64, is_bottom: bool) -> Result<(), ThothError> {
     let tty = OpenOptions::new()
         .read(true)
         .write(true)
@@ -72,7 +72,7 @@ pub fn run(conn: &Connection, now: i64) -> Result<(), ThothError> {
 
     loop {
         terminal
-            .draw(|f| render::draw(f, &app, now, &mut table_state))
+            .draw(|f| render::draw(f, &app, now, is_bottom, &mut table_state))
             .map_err(|e| ThothError::Tui(format!("draw failed: {e}")))?;
 
         if ct_event::poll(std::time::Duration::from_millis(200))
