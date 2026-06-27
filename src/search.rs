@@ -194,7 +194,7 @@ pub fn build_query(
         params.push(Box::new(tag.clone()));
     }
 
-    let limit = args.limit as i64;
+    let limit = args.limit.unwrap_or(50) as i64;
     params.push(Box::new(limit));
 
     let sql = if use_fts {
@@ -391,7 +391,7 @@ mod tests {
             since: None,
             until: None,
             session: None,
-            limit: 50,
+            limit: Some(50),
             show_session: false,
         }
     }
@@ -775,7 +775,7 @@ mod tests {
             );
         }
         let args = SearchArgs {
-            limit: 2,
+            limit: Some(2),
             ..default_args()
         };
         let rows = execute(&args, &conn, FIXED_NOW).unwrap();

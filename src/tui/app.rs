@@ -42,7 +42,7 @@ impl FilterState {
             since: self.since.clone(),
             until: self.until.clone(),
             session: None,
-            limit: TUI_LIMIT,
+            limit: Some(TUI_LIMIT),
             show_session: false,
         }
     }
@@ -143,7 +143,7 @@ mod tests {
         assert!(args.exit.is_none());
         assert!(args.since.is_none());
         assert!(args.until.is_none());
-        assert_eq!(args.limit, TUI_LIMIT);
+        assert_eq!(args.limit, Some(TUI_LIMIT));
     }
 
     #[test]
@@ -161,7 +161,7 @@ mod tests {
         assert_eq!(args.tag, vec!["rust".to_string(), "cli".to_string()]);
         assert_eq!(args.since, Some("2024-01-01".into()));
         assert_eq!(args.until, Some("2024-12-31".into()));
-        assert_eq!(args.limit, TUI_LIMIT);
+        assert_eq!(args.limit, Some(TUI_LIMIT));
     }
 
     #[test]

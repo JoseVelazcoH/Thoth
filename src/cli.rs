@@ -57,6 +57,8 @@ pub enum Cmd {
         about = "Generate a new session ID (invoked by the shell hooks, not by hand)"
     )]
     NewSessionId,
+    #[command(about = "Show the resolved configuration path and effective values")]
+    Config,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -135,8 +137,8 @@ pub struct SearchArgs {
     pub until: Option<String>,
     #[arg(long, help = "Filter by session ID")]
     pub session: Option<String>,
-    #[arg(long, default_value_t = 50, help = "Maximum number of results")]
-    pub limit: usize,
+    #[arg(long, help = "Maximum number of results")]
+    pub limit: Option<usize>,
     #[arg(
         long = "show-session",
         default_value_t = false,
@@ -246,8 +248,9 @@ pub fn run() -> Result<(), crate::error::ThothError> {
 
     match cli.cmd {
         None => {
+            let cfg = crate::config::load();
             let conn = crate::database::get_connection(None)?;
-            crate::tui::run(&conn, now)?;
+            crate::tui::run(&conn, now, cfg.tui.orientation.is_bottom())?;
         }
         Some(Cmd::Record(mut args)) => {
             crate::logging::setup(crate::paths::resolve_error_log());
@@ -264,8 +267,9 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                         .as_secs() as i64,
                 );
             }
+            let cfg = crate::config::load();
             match crate::database::get_connection(None) {
-                Ok(mut conn) => crate::recorder::record(&args, &mut conn),
+                Ok(mut conn) => crate::recorder::record(&args, cfg.session.gap_minutes, &mut conn),
                 Err(e) => crate::logging::log_error(&e.to_string()),
             }
         }
@@ -331,7 +335,10 @@ pub fn run() -> Result<(), crate::error::ThothError> {
             println!("Session ID set:   {}", report.session_id_set);
             println!("tth on PATH:      {}", report.tth_on_path);
         }
-        Some(Cmd::Search(args)) => {
+        Some(Cmd::Search(mut args)) => {
+            let cfg = crate::config::load();
+            let resolved_limit = args.limit.unwrap_or(cfg.search.default_limit);
+            args.limit = Some(resolved_limit);
             let conn = crate::database::get_connection(None)?;
             let rows = crate::search::execute(&args, &conn, now)?;
             print!("{}", crate::search::render(&rows, args.show_session));
@@ -504,18 +511,28 @@ pub fn run() -> Result<(), crate::error::ThothError> {
             let tth_on_path = which_tth();
             let framework = crate::prompt::detect_framework(&crate::prompt::probe_inputs());
             let framework_config_text = read_framework_config(&framework, &home);
+            let config_path = crate::config::resolve_config_path();
+            let config_present = config_path.exists();
             let inputs = crate::doctor::DoctorInputs {
                 hooks_installed,
                 db_result,
                 tth_on_path,
                 framework,
                 framework_config_text,
+                config_path,
+                config_present,
             };
             let report = crate::doctor::run_doctor(&inputs);
             print!("{}", crate::doctor::render_report(&report));
         }
         Some(Cmd::NewSessionId) => {
             println!("{}", uuid::Uuid::new_v4());
+        }
+        Some(Cmd::Config) => {
+            let cfg = crate::config::load();
+            let path = crate::config::resolve_config_path();
+            let exists = path.exists();
+            print!("{}", crate::config::render_config(&cfg, &path, exists));
         }
     }
     Ok(())
