@@ -1969,9 +1969,9 @@ mod tests {
 
     #[test]
     fn format_action_line_replay_produces_correct_prefix() {
-        let action = Action::Replay("/tmp/tth-replay-123.sh".to_string());
+        let action = Action::Replay("( cd '/x' && ls )".to_string());
         let result = format_action_line(Some(&action));
-        assert_eq!(result, Some("REPLAY:/tmp/tth-replay-123.sh".to_string()));
+        assert_eq!(result, Some("REPLAY:( cd '/x' && ls )".to_string()));
     }
 
     #[test]
