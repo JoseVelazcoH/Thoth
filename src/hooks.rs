@@ -54,6 +54,18 @@ fn hook_body(shell: &Shell) -> &'static str {
     }
 }
 
+pub fn render_init(shell: &Shell) -> &'static str {
+    hook_body(shell)
+}
+
+fn eval_line(shell: &Shell) -> String {
+    let name = match shell {
+        Shell::Bash => "bash",
+        Shell::Zsh => "zsh",
+    };
+    format!("eval \"$(tth init {name})\"")
+}
+
 pub fn has_block(content: &str) -> bool {
     content.contains(SENTINEL_BEGIN)
 }
@@ -128,8 +140,8 @@ pub fn install(shell: &Shell, rc_path: &Path) -> Result<InstallReport, ThothErro
         String::new()
     };
     let already_present = has_block(&existing);
-    let body = hook_body(shell);
-    let new_content = insert_or_replace_block(&existing, body);
+    let line = eval_line(shell);
+    let new_content = insert_or_replace_block(&existing, &line);
     std::fs::write(rc_path, &new_content)?;
     let reload_cmd = match shell {
         Shell::Bash => "source ~/.bashrc".to_string(),
@@ -437,5 +449,65 @@ mod tests {
     #[test]
     fn bash_hook_is_non_empty() {
         assert!(!BASH_HOOK.is_empty());
+    }
+
+    #[test]
+    fn render_init_zsh_returns_zsh_hook() {
+        let script = render_init(&Shell::Zsh);
+        assert!(script.contains("_tth_preexec"));
+        assert!(script.contains("bindkey '^R'"));
+        assert!(!script.contains(SENTINEL_BEGIN));
+    }
+
+    #[test]
+    fn render_init_bash_returns_bash_hook() {
+        let script = render_init(&Shell::Bash);
+        assert!(script.contains("_thoth_preexec"));
+        assert!(script.contains("bind -x"));
+        assert!(!script.contains(SENTINEL_BEGIN));
+    }
+
+    #[test]
+    fn eval_line_zsh_format() {
+        let line = eval_line(&Shell::Zsh);
+        assert_eq!(line, "eval \"$(tth init zsh)\"");
+    }
+
+    #[test]
+    fn eval_line_bash_format() {
+        let line = eval_line(&Shell::Bash);
+        assert_eq!(line, "eval \"$(tth init bash)\"");
+    }
+
+    #[test]
+    fn install_writes_eval_line_to_rc() {
+        let dir = TempDir::new().unwrap();
+        let rc = tmp_rc(&dir, ".zshrc");
+        install(&Shell::Zsh, &rc).unwrap();
+        let content = std::fs::read_to_string(&rc).unwrap();
+        assert!(
+            content.contains("eval \"$(tth init zsh)\""),
+            "eval line not found"
+        );
+        assert!(
+            !content.contains("_tth_preexec"),
+            "full body must not appear in rc"
+        );
+    }
+
+    #[test]
+    fn install_migration_replaces_old_body_with_eval_line() {
+        let dir = TempDir::new().unwrap();
+        let rc = tmp_rc(&dir, ".zshrc");
+        let old_block = format!(
+            "{}\n_tth_preexec() {{ : ; }}\n{}",
+            SENTINEL_BEGIN, SENTINEL_END
+        );
+        std::fs::write(&rc, &old_block).unwrap();
+        install(&Shell::Zsh, &rc).unwrap();
+        let content = std::fs::read_to_string(&rc).unwrap();
+        assert_eq!(content.matches(SENTINEL_BEGIN).count(), 1);
+        assert!(content.contains("eval \"$(tth init zsh)\""));
+        assert!(!content.contains("_tth_preexec() { : ; }"));
     }
 }

@@ -19,6 +19,7 @@ pub enum Cmd {
     Sessions(SessionsArgs),
     Forget(ForgetArgs),
     Export(ExportArgs),
+    Init(InitArgs),
     #[command(hide = true)]
     NewSessionId,
 }
@@ -106,6 +107,11 @@ pub struct ExportArgs {
     pub since: Option<String>,
     #[arg(long)]
     pub exit: Option<crate::search::ExitFilter>,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct InitArgs {
+    pub shell: Option<String>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -265,6 +271,11 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                 tags: &args.tag,
             };
             print!("{}", crate::export::render_script(&rows, &meta, now));
+        }
+        Some(Cmd::Init(args)) => {
+            let shell_env = std::env::var("SHELL").ok();
+            let shell = crate::hooks::detect_shell(args.shell.as_deref(), shell_env.as_deref())?;
+            print!("{}", crate::hooks::render_init(&shell));
         }
         Some(Cmd::NewSessionId) => {
             println!("{}", uuid::Uuid::new_v4());
