@@ -41,6 +41,7 @@ mod tests {
             directory: String::new(),
             command: command.to_string(),
             session_id: String::new(),
+            workspace: None,
         }
     }
 

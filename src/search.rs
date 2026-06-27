@@ -122,6 +122,7 @@ pub struct CommandRow {
     pub directory: String,
     pub command: String,
     pub session_id: String,
+    pub workspace: Option<String>,
 }
 
 pub fn parse_duration(s: &str) -> Result<(Ordering, i64), ThothError> {
@@ -214,7 +215,7 @@ pub fn build_query(
     args: &SearchArgs,
     now: i64,
 ) -> Result<(String, Vec<Box<dyn ToSql>>), ThothError> {
-    let cols = "c.timestamp, c.project, c.tags, c.exit_code, c.duration_ms, c.directory, c.command, c.session_id";
+    let cols = "c.timestamp, c.project, c.tags, c.exit_code, c.duration_ms, c.directory, c.command, c.session_id, c.workspace";
 
     let tokens: Vec<String> = match &args.query {
         Some(q) => q
@@ -327,6 +328,7 @@ pub fn execute(
                 directory: row.get(5)?,
                 command: row.get(6)?,
                 session_id: row.get(7)?,
+                workspace: row.get(8)?,
             })
         },
     )?;
@@ -413,6 +415,10 @@ fn exit_cell(code: i64) -> Cell {
     } else {
         Cell::new("fail").fg(Color::Red)
     }
+}
+
+pub fn fmt_timestamp_pub(epoch: i64) -> String {
+    fmt_timestamp(epoch)
 }
 
 pub(crate) fn fmt_timestamp(epoch: i64) -> String {
@@ -909,6 +915,7 @@ mod tests {
                 directory: "/home/user/alpha".into(),
                 command: "cargo build".into(),
                 session_id: "session-aaa".into(),
+                workspace: None,
             },
             CommandRow {
                 timestamp: 1_700_001_000,
@@ -919,6 +926,7 @@ mod tests {
                 directory: "/home/user/beta".into(),
                 command: "make test".into(),
                 session_id: "session-bbb".into(),
+                workspace: None,
             },
         ]
     }
@@ -952,6 +960,7 @@ mod tests {
                 directory: "/home/user/alpha".into(),
                 command: "cmd_a".into(),
                 session_id: "session-aaa".into(),
+                workspace: None,
             },
             CommandRow {
                 timestamp: 1_700_001_000,
@@ -962,6 +971,7 @@ mod tests {
                 directory: "/home/user/alpha".into(),
                 command: "cmd_b".into(),
                 session_id: "session-aaa".into(),
+                workspace: None,
             },
             CommandRow {
                 timestamp: 1_700_002_000,
@@ -972,6 +982,7 @@ mod tests {
                 directory: "/home/user/beta".into(),
                 command: "cmd_c".into(),
                 session_id: "session-bbb".into(),
+                workspace: None,
             },
         ];
         let out = render(&rows, &default_columns(), true);
