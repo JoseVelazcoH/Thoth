@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS projects (
 
 pub const SCHEMA_V3_TERMINAL_ID: &str = "ALTER TABLE commands ADD COLUMN terminal_id TEXT;";
 
+pub const SCHEMA_V4_WORKSPACE: &str = "ALTER TABLE commands ADD COLUMN workspace TEXT;";
+
 pub const SCHEMA_V2_FTS: &str = "
 CREATE VIRTUAL TABLE IF NOT EXISTS commands_fts
     USING fts5(command, content='commands', content_rowid='id');

@@ -1,5 +1,5 @@
 use crate::error::ThothError;
-use crate::schema::{SCHEMA_V1, SCHEMA_V2_FTS, SCHEMA_V3_TERMINAL_ID};
+use crate::schema::{SCHEMA_V1, SCHEMA_V2_FTS, SCHEMA_V3_TERMINAL_ID, SCHEMA_V4_WORKSPACE};
 use rusqlite::{Connection, ErrorCode, TransactionBehavior};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -26,6 +26,7 @@ pub const MIGRATIONS: &[(i64, &str)] = &[
     (1, SCHEMA_V1),
     (2, SCHEMA_V2_FTS),
     (3, SCHEMA_V3_TERMINAL_ID),
+    (4, SCHEMA_V4_WORKSPACE),
 ];
 
 pub fn connect_memory() -> Result<Connection, ThothError> {
@@ -140,6 +141,63 @@ mod tests {
     }
 
     #[test]
+    fn v4_workspace_column_exists() {
+        let conn = mem_conn();
+        let cols: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(commands)").unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        assert!(
+            cols.iter().any(|c| c == "workspace"),
+            "workspace column missing: {cols:?}"
+        );
+    }
+
+    #[test]
+    fn v4_pre_existing_rows_have_null_workspace() {
+        let mut conn = connect_memory().unwrap();
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(1, ?1)",
+            rusqlite::params![now],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO commands(command, directory, project, session_id, timestamp) VALUES('pre-v4-cmd', '/tmp', 'p', 's1', 1700000001)",
+            [],
+        ).unwrap();
+        apply_migrations(&mut conn).unwrap();
+        let workspace: Option<String> = conn
+            .query_row(
+                "SELECT workspace FROM commands WHERE command='pre-v4-cmd'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            workspace.is_none(),
+            "expected NULL workspace for pre-existing row"
+        );
+    }
+
+    #[test]
+    fn v4_migration_idempotent() {
+        let mut conn = mem_conn();
+        let ver_before = current_version(&conn);
+        assert_eq!(ver_before, 4);
+        apply_migrations(&mut conn).unwrap();
+        let ver_after = current_version(&conn);
+        assert_eq!(ver_after, 4);
+    }
+
+    #[test]
     fn v3_terminal_id_column_exists() {
         let conn = mem_conn();
         let cols: Vec<String> = {
@@ -190,16 +248,16 @@ mod tests {
     fn v3_migration_idempotent() {
         let mut conn = mem_conn();
         let ver_before = current_version(&conn);
-        assert_eq!(ver_before, 3);
+        assert_eq!(ver_before, 4);
         apply_migrations(&mut conn).unwrap();
         let ver_after = current_version(&conn);
-        assert_eq!(ver_after, 3);
+        assert_eq!(ver_after, 4);
     }
 
     #[test]
-    fn v3_current_version_is_3() {
+    fn v3_current_version_is_4() {
         let conn = mem_conn();
-        assert_eq!(current_version(&conn), 3);
+        assert_eq!(current_version(&conn), 4);
     }
 
     #[test]
@@ -418,7 +476,7 @@ mod tests {
                     |r| r.get(0),
                 )
                 .unwrap();
-            assert_eq!(ver, 3, "round {_round}: schema not at final version");
+            assert_eq!(ver, 4, "round {_round}: schema not at final version");
 
             let count: i64 = conn
                 .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
