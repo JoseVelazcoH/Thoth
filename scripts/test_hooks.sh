@@ -491,7 +491,125 @@ STUB
     [[ $ok -eq 1 ]] && _pass "tth init zsh: hook functions defined after sourcing output"
 }
 
-echo "=== Thoth shell hook smoke tests ==="
+_run_tth_tag_zsh_test() {
+    if ! command -v zsh >/dev/null 2>&1; then
+        _skip "zsh not available for tth-tag test"
+        return
+    fi
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' RETURN
+
+    local stub_bin="$tmpdir/tth"
+    cat > "$stub_bin" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "tag" ]]; then
+    shift
+    echo "export TTH_ACTIVE_TAGS='[\"$1\"]'"
+    echo "export TTH_PROMPT_TAGS='[$1]'"
+elif [[ "$1" == "new-session-id" ]]; then
+    echo "test-session"
+fi
+STUB
+    chmod +x "$stub_bin"
+
+    local result
+    result="$(PATH="$tmpdir:$PATH" TTH_SESSION_ID="test" zsh --no-rcs -c "
+        source '${REPO_ROOT}/shells/thoth.zsh' 2>/dev/null || true
+        typeset -f tth-tag >/dev/null 2>&1 && echo defined_tth_tag
+        typeset -f tth-untag >/dev/null 2>&1 && echo defined_tth_untag
+        tth-tag foo 2>/dev/null
+        echo \"TAGS=\$TTH_ACTIVE_TAGS\"
+        echo \"PROMPT=\$TTH_PROMPT_TAGS\"
+    " 2>/dev/null)"
+
+    if [[ "$result" == *"defined_tth_tag"* ]]; then
+        _pass "zsh: tth-tag function defined after sourcing thoth.zsh"
+    else
+        _fail "zsh: tth-tag function NOT defined after sourcing thoth.zsh"
+    fi
+    if [[ "$result" == *"defined_tth_untag"* ]]; then
+        _pass "zsh: tth-untag function defined after sourcing thoth.zsh"
+    else
+        _fail "zsh: tth-untag function NOT defined after sourcing thoth.zsh"
+    fi
+    if [[ "$result" == *'TAGS=["foo"]'* ]]; then
+        _pass "zsh: tth-tag foo sets TTH_ACTIVE_TAGS"
+    else
+        _fail "zsh: tth-tag foo did not set TTH_ACTIVE_TAGS; got: $result"
+    fi
+    if [[ "$result" == *"PROMPT=[foo]"* ]]; then
+        _pass "zsh: tth-tag foo sets TTH_PROMPT_TAGS=[foo]"
+    else
+        _fail "zsh: tth-tag foo did not set TTH_PROMPT_TAGS; got: $result"
+    fi
+}
+
+_run_tth_tag_bash_test() {
+    if (( BASH_VERSINFO[0] < 5 )); then
+        _skip "bash < 5; tth-tag bash test requires bash >= 5"
+        return
+    fi
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' RETURN
+
+    local stub_bin="$tmpdir/tth"
+    cat > "$stub_bin" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "tag" ]]; then
+    shift
+    echo "export TTH_ACTIVE_TAGS='[\"$1\"]'"
+    echo "export TTH_PROMPT_TAGS='[$1]'"
+elif [[ "$1" == "new-session-id" ]]; then
+    echo "test-session"
+fi
+STUB
+    chmod +x "$stub_bin"
+
+    local result
+    result="$(PATH="$tmpdir:$PATH" TTH_SESSION_ID="test" bash --norc --noprofile -c "
+        source '${REPO_ROOT}/shells/thoth.bash' 2>/dev/null || true
+        declare -f tth-tag >/dev/null 2>&1 && echo defined_tth_tag
+        declare -f tth-untag >/dev/null 2>&1 && echo defined_tth_untag
+        tth-tag bar 2>/dev/null
+        echo \"TAGS=\$TTH_ACTIVE_TAGS\"
+        echo \"PROMPT=\$TTH_PROMPT_TAGS\"
+    " 2>/dev/null)"
+
+    if [[ "$result" == *"defined_tth_tag"* ]]; then
+        _pass "bash: tth-tag function defined after sourcing thoth.bash"
+    else
+        _fail "bash: tth-tag function NOT defined after sourcing thoth.bash"
+    fi
+    if [[ "$result" == *"defined_tth_untag"* ]]; then
+        _pass "bash: tth-untag function defined after sourcing thoth.bash"
+    else
+        _fail "bash: tth-untag function NOT defined after sourcing thoth.bash"
+    fi
+    if [[ "$result" == *'TAGS=["bar"]'* ]]; then
+        _pass "bash: tth-tag bar sets TTH_ACTIVE_TAGS"
+    else
+        _fail "bash: tth-tag bar did not set TTH_ACTIVE_TAGS; got: $result"
+    fi
+    if [[ "$result" == *"PROMPT=[bar]"* ]]; then
+        _pass "bash: tth-tag bar sets TTH_PROMPT_TAGS=[bar]"
+    else
+        _fail "bash: tth-tag bar did not set TTH_PROMPT_TAGS; got: $result"
+    fi
+}
+
+_run_tth_tag_capture_exclusion() {
+    local content
+    content="$(cat "${REPO_ROOT}/shells/thoth.zsh")"
+    if [[ "$content" == *'tth|tth\ *'* ]] || [[ "$content" == *'tth|tth '*'*'* ]]; then
+        _pass "thoth.zsh: tth-tag excluded from capture (tth* case pattern covers it)"
+    else
+        _fail "thoth.zsh: capture exclusion pattern may not cover tth-tag calls"
+    fi
+}
+
+echo "=== Thoth shell hook smoke tests and tag tests ==="
 _run_bash_version_check
 _run_bash_syntax_check
 _run_zsh_syntax_check
@@ -513,6 +631,9 @@ _run_bash_parse_edit_prefix
 _run_init_zsh_syntax_check
 _run_init_bash_syntax_check
 _run_init_zsh_defines_hooks
+_run_tth_tag_zsh_test
+_run_tth_tag_bash_test
+_run_tth_tag_capture_exclusion
 
 echo "---"
 echo "PASS=$PASS FAIL=$FAIL SKIP=$SKIP"

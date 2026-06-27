@@ -12,4 +12,5 @@ pub mod schema;
 pub mod search;
 pub mod session;
 pub mod sessions;
+pub mod tags;
 pub mod tui;

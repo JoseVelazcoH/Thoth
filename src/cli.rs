@@ -20,6 +20,10 @@ pub enum Cmd {
     Forget(ForgetArgs),
     Export(ExportArgs),
     Init(InitArgs),
+    Tag(TagArgs),
+    Untag(UntagArgs),
+    Tags(TagsArgs),
+    Prompt(PromptArgs),
     #[command(hide = true)]
     NewSessionId,
 }
@@ -111,6 +115,30 @@ pub struct ExportArgs {
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct InitArgs {
+    pub shell: Option<String>,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct TagArgs {
+    pub name: String,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct UntagArgs {
+    pub name: Option<String>,
+    #[arg(long)]
+    pub all: bool,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct TagsArgs {
+    #[arg(long)]
+    pub list: bool,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct PromptArgs {
+    #[arg(long)]
     pub shell: Option<String>,
 }
 
@@ -277,6 +305,86 @@ pub fn run() -> Result<(), crate::error::ThothError> {
             let shell = crate::hooks::detect_shell(args.shell.as_deref(), shell_env.as_deref())?;
             print!("{}", crate::hooks::render_init(&shell));
         }
+        Some(Cmd::Tag(args)) => {
+            if args.name.is_empty() {
+                return Err(crate::error::ThothError::Tag(
+                    "tag name cannot be empty".into(),
+                ));
+            }
+            let current = std::env::var("TTH_ACTIVE_TAGS").unwrap_or_else(|_| "[]".into());
+            let new_json = crate::tags::add_tag(&current, &args.name);
+            print!("{}", crate::tags::export_line(&new_json));
+            let segment = crate::tags::format_prompt_segment(&new_json);
+            let display = if segment.is_empty() {
+                "(none)".to_string()
+            } else {
+                segment
+            };
+            eprintln!("Active tags: {display}");
+        }
+        Some(Cmd::Untag(args)) => {
+            if args.name.is_none() && !args.all {
+                return Err(crate::error::ThothError::Tag(
+                    "specify a tag name or --all".into(),
+                ));
+            }
+            let current = std::env::var("TTH_ACTIVE_TAGS").unwrap_or_else(|_| "[]".into());
+            let new_json = if args.all {
+                crate::tags::clear_tags()
+            } else {
+                crate::tags::remove_tag(&current, args.name.as_deref().unwrap_or(""))
+            };
+            print!("{}", crate::tags::export_line(&new_json));
+            let segment = crate::tags::format_prompt_segment(&new_json);
+            let display = if segment.is_empty() {
+                "(none)".to_string()
+            } else {
+                segment
+            };
+            eprintln!("Active tags: {display}");
+        }
+        Some(Cmd::Tags(args)) => {
+            if args.list {
+                let conn = crate::database::get_connection(None)?;
+                let tags = crate::tags::list_db_tags(&conn)?;
+                if tags.is_empty() {
+                    println!("(no tags recorded)");
+                } else {
+                    for (tag, count) in tags {
+                        let noun = if count == 1 { "command" } else { "commands" };
+                        println!("{tag} ({count} {noun})");
+                    }
+                }
+            } else {
+                let current = std::env::var("TTH_ACTIVE_TAGS").unwrap_or_else(|_| "[]".into());
+                let tags = crate::tags::parse_active(&current);
+                if tags.is_empty() {
+                    println!("(none)");
+                } else {
+                    for tag in tags {
+                        println!("{tag}");
+                    }
+                }
+            }
+        }
+        Some(Cmd::Prompt(args)) => {
+            let shell_hint = args.shell.as_deref().unwrap_or("");
+            let use_starship = if shell_hint == "starship" {
+                true
+            } else {
+                which_starship()
+            };
+            if use_starship {
+                println!("[custom.thoth_tags]");
+                println!("command = \"echo $TTH_PROMPT_TAGS\"");
+                println!("when = \"[ -n \\\"$TTH_PROMPT_TAGS\\\" ]\"");
+                println!("style = \"bold yellow\"");
+                println!("format = \"[$output]($style) \"");
+            } else {
+                println!("Add to your PROMPT (zsh) or PS1 (bash):");
+                println!("  ${{TTH_PROMPT_TAGS}}");
+            }
+        }
         Some(Cmd::NewSessionId) => {
             println!("{}", uuid::Uuid::new_v4());
         }
@@ -287,5 +395,11 @@ pub fn run() -> Result<(), crate::error::ThothError> {
 fn which_tth() -> bool {
     std::env::var_os("PATH")
         .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join("tth").exists()))
+        .unwrap_or(false)
+}
+
+fn which_starship() -> bool {
+    std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join("starship").exists()))
         .unwrap_or(false)
 }

@@ -32,6 +32,18 @@ _tth_precmd() {
 add-zsh-hook preexec _tth_preexec
 add-zsh-hook precmd _tth_precmd
 
+tth-tag() {
+    eval "$(command tth tag "$1")"
+}
+
+tth-untag() {
+    if [[ "$1" == "--all" ]]; then
+        eval "$(command tth untag --all)"
+    else
+        eval "$(command tth untag "$1")"
+    fi
+}
+
 _tth_widget() {
     command -v tth >/dev/null 2>&1 || return
     local out

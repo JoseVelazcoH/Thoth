@@ -69,3 +69,15 @@ _tth_widget() {
 }
 
 bind -x '"\C-r": _tth_widget'
+
+tth-tag() {
+    eval "$(command tth tag "$1")"
+}
+
+tth-untag() {
+    if [[ "$1" == "--all" ]]; then
+        eval "$(command tth untag --all)"
+    else
+        eval "$(command tth untag "$1")"
+    fi
+}
