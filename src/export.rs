@@ -181,6 +181,10 @@ pub fn render_replay_script(rows: &[ExportRow]) -> String {
     for row in rows {
         let escaped_dir = row.directory.replace('\'', "'\\''");
         out.push_str(&format!("cd '{escaped_dir}'\n"));
+        let escaped_cmd = row.command.replace('\'', "'\\''");
+        out.push_str(&format!(
+            "printf '\\033[36m> %s\\033[0m\\n' '{escaped_cmd}'\n"
+        ));
         out.push_str(&row.command);
         out.push('\n');
     }
@@ -716,6 +720,28 @@ mod tests {
         let cd_pos = out.find("cd '/home/user/proj'").unwrap();
         let cmd_pos = out.find("cargo build").unwrap();
         assert!(cd_pos < cmd_pos, "cd must come before the command");
+    }
+
+    #[test]
+    fn render_replay_script_echoes_each_command_before_running() {
+        let rows = vec![ExportRow {
+            command: "z somewhere".into(),
+            directory: "/tmp".into(),
+            timestamp: 1_000,
+            exit_code: 0,
+            duration_ms: 100,
+        }];
+        let out = render_replay_script(&rows);
+        let echo_pos = out.find("printf").expect("must echo the command");
+        let run_pos = out.rfind("z somewhere\n").expect("must run the command");
+        assert!(
+            echo_pos < run_pos,
+            "echo must come before running; got:\n{out}"
+        );
+        assert!(
+            out.contains("'z somewhere'"),
+            "echoes the command text; got:\n{out}"
+        );
     }
 
     #[test]
