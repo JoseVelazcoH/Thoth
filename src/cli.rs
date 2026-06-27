@@ -119,9 +119,12 @@ pub struct SearchArgs {
     pub project: Option<String>,
     #[arg(short = 't', long, action = clap::ArgAction::Append, help = "Filter by tag (repeatable)")]
     pub tag: Vec<String>,
-    #[arg(long, help = "Filter by exit status: ok, fail, or a specific code")]
+    #[arg(long, help = "Filter by exit status: ok, fail, or any")]
     pub exit: Option<crate::search::ExitFilter>,
-    #[arg(long, help = "Filter by minimum duration, e.g. 500ms or 2s")]
+    #[arg(
+        long,
+        help = "Filter by duration in seconds, e.g. >30 (over 30s) or <5 (under 5s)"
+    )]
     pub duration: Option<String>,
     #[arg(
         long,
@@ -168,7 +171,7 @@ pub struct ExportArgs {
     pub project: Option<String>,
     #[arg(long, help = "Export commands after this time")]
     pub since: Option<String>,
-    #[arg(long, help = "Filter by exit status: ok, fail, or a specific code")]
+    #[arg(long, help = "Filter by exit status: ok, fail, or any")]
     pub exit: Option<crate::search::ExitFilter>,
 }
 
