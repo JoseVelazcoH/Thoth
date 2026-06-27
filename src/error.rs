@@ -16,6 +16,8 @@ pub enum ThothError {
     Tag(String),
     #[error("{0}")]
     Prompt(String),
+    #[error("config: {0}")]
+    Config(String),
 }
 
 #[cfg(test)]
