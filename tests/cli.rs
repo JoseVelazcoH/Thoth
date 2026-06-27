@@ -2,7 +2,6 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use rusqlite::Connection;
 use tempfile::TempDir;
-use std::path::PathBuf;
 
 fn tth() -> Command {
     Command::cargo_bin("tth").unwrap()
@@ -439,7 +438,7 @@ fn record_never_fail_contract_preserved() {
         .code(0);
 }
 
-fn tth_with_env(db_path: &PathBuf, error_log: &PathBuf) -> Command {
+fn tth_with_env(db_path: &std::path::Path, error_log: &std::path::Path) -> Command {
     let mut cmd = tth();
     cmd.env("THOTH_DB", db_path.to_str().unwrap())
         .env("THOTH_ERROR_LOG", error_log.to_str().unwrap());
@@ -491,7 +490,9 @@ fn install_output_includes_prompt_hint() {
         ])
         .assert()
         .code(0)
-        .stdout(predicate::str::contains("To show active tags in your prompt:"));
+        .stdout(predicate::str::contains(
+            "To show active tags in your prompt:",
+        ));
 }
 
 #[test]
