@@ -12,6 +12,8 @@ pub enum ThothError {
     Forget(String),
     #[error("tui: {0}")]
     Tui(String),
+    #[error("{0}")]
+    Tag(String),
 }
 
 #[cfg(test)]
@@ -44,6 +46,10 @@ mod tests {
         assert_eq!(
             ThothError::Tui("render failed".into()).to_string(),
             "tui: render failed"
+        );
+        assert_eq!(
+            ThothError::Tag("empty tag name".into()).to_string(),
+            "empty tag name"
         );
     }
 }
