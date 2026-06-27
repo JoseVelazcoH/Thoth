@@ -47,7 +47,7 @@ impl Drop for TerminalGuard {
 }
 
 pub fn run(
-    conn: &Connection,
+    conn: &mut Connection,
     now: i64,
     is_bottom: bool,
     columns: Vec<Column>,
@@ -91,6 +91,18 @@ pub fn run(
                 match handle_key(key, &mut app) {
                     Outcome::Exit => break,
                     Outcome::Continue => {
+                        if let Some((id, new_cmd)) = app.pending_edit.take() {
+                            crate::edit::edit_command(conn, id, &new_cmd)
+                                .map_err(|e| ThothError::Tui(format!("edit failed: {e}")))?;
+                            app.reload(conn, now).map_err(|e| {
+                                ThothError::Tui(format!("history reload after edit failed: {e}"))
+                            })?;
+                            app.reload_ws_commands(conn).map_err(|e| {
+                                ThothError::Tui(format!(
+                                    "ws commands reload after edit failed: {e}"
+                                ))
+                            })?;
+                        }
                         if let Some((id, origin)) = app.pending_delete.take() {
                             crate::forget::delete_targets(conn, &[id])
                                 .map_err(|e| ThothError::Tui(format!("delete failed: {e}")))?;

@@ -2,6 +2,7 @@ pub mod cli;
 pub mod config;
 pub mod database;
 pub mod doctor;
+pub mod edit;
 pub mod error;
 pub mod export;
 pub mod forget;

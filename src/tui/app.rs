@@ -52,6 +52,11 @@ pub enum Confirm {
     Delete(ConfirmDelete),
 }
 
+pub struct EditState {
+    pub id: i64,
+    pub buffer: String,
+}
+
 pub struct FilterState {
     pub project: Option<String>,
     pub tag: Vec<String>,
@@ -121,6 +126,8 @@ pub struct App {
     pub confirm: Option<Confirm>,
     pub replay_workspace: Option<String>,
     pub pending_delete: Option<(i64, DeleteOrigin)>,
+    pub edit: Option<EditState>,
+    pub pending_edit: Option<(i64, String)>,
 }
 
 impl Default for App {
@@ -151,6 +158,8 @@ impl App {
             confirm: None,
             replay_workspace: None,
             pending_delete: None,
+            edit: None,
+            pending_edit: None,
         }
     }
 
@@ -331,6 +340,51 @@ impl App {
     pub fn move_down(&mut self) {
         if self.selected > 0 {
             self.selected -= 1;
+        }
+    }
+
+    pub fn begin_edit_history(&mut self) {
+        if let Some(id) = self.selected_history_id() {
+            let buffer = self
+                .filtered
+                .get(self.selected)
+                .and_then(|idx| self.all_rows.get(*idx))
+                .map(|r| r.command.clone())
+                .unwrap_or_default();
+            self.edit = Some(EditState { id, buffer });
+        }
+    }
+
+    pub fn begin_edit_ws(&mut self) {
+        if let Some(id) = self.selected_ws_command_id() {
+            let buffer = self
+                .ws_commands
+                .get(self.ws_cmd_selected)
+                .map(|r| r.command.clone())
+                .unwrap_or_default();
+            self.edit = Some(EditState { id, buffer });
+        }
+    }
+
+    pub fn edit_push(&mut self, c: char) {
+        if let Some(ref mut es) = self.edit {
+            es.buffer.push(c);
+        }
+    }
+
+    pub fn edit_backspace(&mut self) {
+        if let Some(ref mut es) = self.edit {
+            es.buffer.pop();
+        }
+    }
+
+    pub fn edit_cancel(&mut self) {
+        self.edit = None;
+    }
+
+    pub fn edit_commit(&mut self) {
+        if let Some(es) = self.edit.take() {
+            self.pending_edit = Some((es.id, es.buffer));
         }
     }
 }
@@ -887,5 +941,91 @@ mod tests {
         assert!(app.confirm.is_some());
         app.cancel_confirm();
         assert!(app.confirm.is_none());
+    }
+
+    #[test]
+    fn begin_edit_history_sets_edit_with_correct_id_and_buffer() {
+        let conn = make_conn();
+        seed(&conn, "git status", 2000);
+        let mut app = App::new();
+        app.reload(&conn, 9999).unwrap();
+        app.selected = 0;
+        let expected_id = app.selected_history_id().unwrap();
+        app.begin_edit_history();
+        let es = app.edit.as_ref().unwrap();
+        assert_eq!(es.id, expected_id);
+        assert_eq!(es.buffer, "git status");
+    }
+
+    #[test]
+    fn begin_edit_history_no_selection_is_noop() {
+        let mut app = App::new();
+        app.begin_edit_history();
+        assert!(app.edit.is_none());
+    }
+
+    #[test]
+    fn begin_edit_ws_sets_edit_with_correct_id_and_buffer() {
+        let mut app = app_with_ws("demo", 2);
+        app.ws_cmd_selected = 1;
+        let expected_id = app.ws_commands[1].id;
+        let expected_buf = app.ws_commands[1].command.clone();
+        app.begin_edit_ws();
+        let es = app.edit.as_ref().unwrap();
+        assert_eq!(es.id, expected_id);
+        assert_eq!(es.buffer, expected_buf);
+    }
+
+    #[test]
+    fn begin_edit_ws_no_selection_is_noop() {
+        let mut app = App::new();
+        app.begin_edit_ws();
+        assert!(app.edit.is_none());
+    }
+
+    #[test]
+    fn edit_push_appends_char_to_buffer() {
+        let mut app = App::new();
+        app.edit = Some(EditState {
+            id: 1,
+            buffer: "git".into(),
+        });
+        app.edit_push(' ');
+        app.edit_push('s');
+        assert_eq!(app.edit.as_ref().unwrap().buffer, "git s");
+    }
+
+    #[test]
+    fn edit_backspace_removes_last_char() {
+        let mut app = App::new();
+        app.edit = Some(EditState {
+            id: 1,
+            buffer: "git status".into(),
+        });
+        app.edit_backspace();
+        assert_eq!(app.edit.as_ref().unwrap().buffer, "git statu");
+    }
+
+    #[test]
+    fn edit_cancel_clears_edit() {
+        let mut app = App::new();
+        app.edit = Some(EditState {
+            id: 1,
+            buffer: "something".into(),
+        });
+        app.edit_cancel();
+        assert!(app.edit.is_none());
+    }
+
+    #[test]
+    fn edit_commit_sets_pending_edit_and_clears_edit() {
+        let mut app = App::new();
+        app.edit = Some(EditState {
+            id: 42,
+            buffer: "corrected cmd".into(),
+        });
+        app.edit_commit();
+        assert!(app.edit.is_none());
+        assert_eq!(app.pending_edit, Some((42, "corrected cmd".to_string())));
     }
 }

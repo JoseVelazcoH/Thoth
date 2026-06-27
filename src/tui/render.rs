@@ -13,6 +13,8 @@ use crate::workspaces::WorkspaceRow;
 
 const ACCENT: Color = Color::Cyan;
 const DIM_COLOR: Color = Color::DarkGray;
+const EDIT_MODAL_W: u16 = 60;
+const EDIT_MODAL_H: u16 = 5;
 const BORDER_COLOR: Color = Color::DarkGray;
 
 pub fn display_command(raw: &str) -> String {
@@ -543,6 +545,9 @@ pub fn draw_with_cmd_state(
     if app.confirm.is_some() {
         render_confirm_modal(frame, middle_area, app);
     }
+    if let Some(ref es) = app.edit {
+        render_edit_modal(frame, middle_area, es);
+    }
 
     let query_text = format!("> {}", app.query);
     frame.render_widget(Paragraph::new(query_text), query_area);
@@ -584,6 +589,9 @@ pub fn draw_with_cmd_state(
                 Span::styled("d", accent_style),
                 Span::styled(" delete", dim_style),
                 Span::styled(" · ", dim_style),
+                Span::styled("e", accent_style),
+                Span::styled(" edit", dim_style),
+                Span::styled(" · ", dim_style),
                 Span::styled("↵", accent_style),
                 Span::styled(" run", dim_style),
                 Span::styled(" · ", dim_style),
@@ -620,6 +628,9 @@ pub fn draw_with_cmd_state(
                 Span::styled(" · ", dim_style),
                 Span::styled("d", accent_style),
                 Span::styled(" delete", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("e", accent_style),
+                Span::styled(" edit", dim_style),
                 Span::styled(" · ", dim_style),
                 Span::styled("⇥", accent_style),
                 Span::styled(" back", dim_style),
@@ -712,6 +723,40 @@ fn render_confirm_modal(frame: &mut Frame, area: Rect, app: &crate::tui::app::Ap
             frame.render_widget(hint, inner);
         }
     }
+}
+
+fn render_edit_modal(frame: &mut Frame, area: Rect, es: &crate::tui::app::EditState) {
+    let dim_style = Style::default().fg(DIM_COLOR);
+    let accent_style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+
+    let modal_area = centered_rect(EDIT_MODAL_W, EDIT_MODAL_H, area);
+    frame.render_widget(Clear, modal_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(ACCENT))
+        .title(Span::styled(" Edit command ", accent_style));
+
+    let inner = block.inner(modal_area);
+    frame.render_widget(block, modal_area);
+
+    let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+
+    let display = format!("{}_", es.buffer);
+    frame.render_widget(
+        Paragraph::new(Span::styled(display, Style::default())),
+        chunks[0],
+    );
+
+    let hint = Paragraph::new(Line::from(vec![
+        Span::styled("↵", accent_style),
+        Span::styled(" save   ", dim_style),
+        Span::styled("esc", accent_style),
+        Span::styled(" cancel", dim_style),
+    ]))
+    .alignment(Alignment::Center);
+    frame.render_widget(hint, chunks[1]);
 }
 
 #[cfg(test)]
@@ -2208,6 +2253,59 @@ mod tests {
         assert!(
             dump_c.contains("back"),
             "Commands pane controls must show 'back'"
+        );
+    }
+
+    #[test]
+    fn edit_modal_shows_buffer_text_and_hints() {
+        use crate::tui::app::EditState;
+
+        let mut app = App::new();
+        app.all_rows = vec![make_row("git status", TEST_NOW - 60, 0, "p")];
+        app.recompute();
+        app.edit = Some(EditState {
+            id: 1,
+            buffer: "git status --short".into(),
+        });
+        let text = render_app(&app);
+        assert!(
+            text.contains("git status --short"),
+            "edit modal must show buffer text; got:\n{text}"
+        );
+        assert!(
+            text.contains("save"),
+            "edit modal must show 'save' hint; got:\n{text}"
+        );
+        assert!(
+            text.contains("cancel"),
+            "edit modal must show 'cancel' hint; got:\n{text}"
+        );
+        assert!(
+            text.contains("Edit command"),
+            "edit modal must show 'Edit command' title; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn history_normal_controls_show_edit_hint() {
+        let mut app = app_with_rows();
+        app.mode = crate::tui::app::Mode::Normal;
+        let text = render_app(&app);
+        assert!(
+            text.contains("edit"),
+            "History Normal controls must contain 'edit' hint; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn ws_commands_controls_show_edit_hint() {
+        let mut app = App::new();
+        app.tab = Tab::Workspaces;
+        app.ws_pane = WsPane::Commands;
+        let text = render_app(&app);
+        assert!(
+            text.contains("edit"),
+            "Workspaces Commands controls must contain 'edit' hint; got:\n{text}"
         );
     }
 }
