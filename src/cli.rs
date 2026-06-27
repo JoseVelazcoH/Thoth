@@ -24,6 +24,7 @@ pub enum Cmd {
     Untag(UntagArgs),
     Tags(TagsArgs),
     Prompt(PromptArgs),
+    Doctor,
     #[command(hide = true)]
     NewSessionId,
 }
@@ -139,7 +140,7 @@ pub struct TagsArgs {
 #[derive(clap::Args, Debug, Clone)]
 pub struct PromptArgs {
     #[arg(long)]
-    pub shell: Option<String>,
+    pub framework: Option<String>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -200,6 +201,9 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                 println!("Installed hooks in {}", rc_path.display());
             }
             println!("Reload shell: {}", report.reload_cmd);
+            let framework = crate::prompt::detect_framework(&crate::prompt::probe_inputs());
+            let snippet = crate::prompt::prompt_snippet(&framework);
+            println!("\nTo show active tags in your prompt:\n{snippet}");
         }
         Some(Cmd::Uninstall(args)) => {
             let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
@@ -368,27 +372,54 @@ pub fn run() -> Result<(), crate::error::ThothError> {
             }
         }
         Some(Cmd::Prompt(args)) => {
-            let shell_hint = args.shell.as_deref().unwrap_or("");
-            let use_starship = if shell_hint == "starship" {
-                true
+            let framework = if let Some(ref fw) = args.framework {
+                crate::prompt::parse_framework(fw)?
             } else {
-                which_starship()
+                crate::prompt::detect_framework(&crate::prompt::probe_inputs())
             };
-            if use_starship {
-                println!("# Step 1: add this module to ~/.config/starship.toml");
-                println!("[custom.thoth_tags]");
-                println!("command = \"echo $TTH_PROMPT_TAGS\"");
-                println!("when = \"[ -n \\\"$TTH_PROMPT_TAGS\\\" ]\"");
-                println!("style = \"bold yellow\"");
-                println!("format = \"[$output]($style) \"");
-                println!("# Step 2: if you have a top-level format string, add");
-                println!("# ${{custom.thoth_tags}} to it where you want the tags to show");
-                println!("# (for example right after $git_status). Without this the");
-                println!("# module will not appear when you have a custom format.");
+            print!("{}", crate::prompt::prompt_snippet(&framework));
+        }
+        Some(Cmd::Doctor) => {
+            let shell_env = std::env::var("SHELL").ok();
+            let shell = crate::hooks::detect_shell(None, shell_env.as_deref())
+                .unwrap_or(crate::hooks::Shell::Bash);
+            let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
+            let rc_path = crate::hooks::default_rc_path(&shell, std::path::Path::new(&home));
+            let hooks_installed = if rc_path.exists() {
+                std::fs::read_to_string(&rc_path)
+                    .map(|s| crate::hooks::has_block(&s))
+                    .unwrap_or(false)
             } else {
-                println!("Add ${{TTH_PROMPT_TAGS}} to your PROMPT (zsh) or PS1 (bash)");
-                println!("where you want active tags to show.");
-            }
+                false
+            };
+            let db_result = crate::database::get_connection(None)
+                .map(|conn| {
+                    let schema_version = crate::database::current_version(&conn);
+                    let total_commands: i64 = conn
+                        .query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))
+                        .unwrap_or(0);
+                    let last_timestamp: Option<i64> = conn
+                        .query_row("SELECT MAX(timestamp) FROM commands", [], |r| r.get(0))
+                        .unwrap_or(None);
+                    crate::doctor::DbInfo {
+                        schema_version,
+                        total_commands,
+                        last_timestamp,
+                    }
+                })
+                .map_err(|e| e.to_string());
+            let tth_on_path = which_tth();
+            let framework = crate::prompt::detect_framework(&crate::prompt::probe_inputs());
+            let framework_config_text = read_framework_config(&framework, &home);
+            let inputs = crate::doctor::DoctorInputs {
+                hooks_installed,
+                db_result,
+                tth_on_path,
+                framework,
+                framework_config_text,
+            };
+            let report = crate::doctor::run_doctor(&inputs);
+            print!("{}", crate::doctor::render_report(&report));
         }
         Some(Cmd::NewSessionId) => {
             println!("{}", uuid::Uuid::new_v4());
@@ -403,8 +434,24 @@ fn which_tth() -> bool {
         .unwrap_or(false)
 }
 
-fn which_starship() -> bool {
-    std::env::var_os("PATH")
-        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join("starship").exists()))
-        .unwrap_or(false)
+fn read_framework_config(framework: &crate::prompt::PromptFramework, home: &str) -> Option<String> {
+    use crate::prompt::PromptFramework;
+    let home_path = std::path::Path::new(home);
+    let config_path = match framework {
+        PromptFramework::Starship => home_path.join(".config/starship.toml"),
+        PromptFramework::Powerlevel10k => home_path.join(".p10k.zsh"),
+        PromptFramework::OhMyPosh => {
+            let dir = home_path.join(".config/oh-my-posh");
+            if dir.exists() {
+                if let Ok(mut entries) = std::fs::read_dir(&dir) {
+                    if let Some(Ok(entry)) = entries.next() {
+                        return std::fs::read_to_string(entry.path()).ok();
+                    }
+                }
+            }
+            return None;
+        }
+        PromptFramework::Generic => return None,
+    };
+    std::fs::read_to_string(config_path).ok()
 }

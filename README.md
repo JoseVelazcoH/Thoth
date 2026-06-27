@@ -15,3 +15,78 @@ The name comes from Thoth, the Egyptian god of writing and memory. The binary is
 Early development. The capture engine is written in Rust and ships as a single static binary (SQLite with full-text search is bundled in). Shell hooks for automatic capture (bash and zsh) and the query commands are in progress.
 
 A Python prototype that validated the original design lives under `prototype/python/`.
+
+## Prompt setup
+
+<a name="prompt-setup"></a>
+
+After running `tth install`, the shell hook exports `TTH_PROMPT_TAGS` (e.g. `[work][api]`) and `TTH_ACTIVE_TAGS` (JSON) on every command. To show active tags in your prompt, pick the section for your framework below.
+
+### Starship
+
+Add to `~/.config/starship.toml`:
+
+```toml
+[env_var.thoth_tags]
+variable = "TTH_PROMPT_TAGS"
+format = "[$env_value]($style) "
+style = "bold yellow"
+```
+
+**Important:** Starship does not render modules that are not referenced in the top-level `format` string. Add `${env_var.thoth_tags}` to your `format` where you want tags to appear:
+
+```toml
+format = "$git_status ${env_var.thoth_tags}$character"
+```
+
+### Powerlevel10k
+
+Add to your `~/.zshrc` after p10k is loaded:
+
+```zsh
+# 1. Define a custom segment function:
+prompt_tth_tags() {
+  p10k segment -t "$TTH_PROMPT_TAGS"
+}
+
+# 2. Add tth_tags to your prompt elements, e.g.:
+# POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(... tth_tags)
+# or POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(... tth_tags)
+```
+
+See [p10k custom segments](https://github.com/romkatv/powerlevel10k#batteries-included) for details.
+
+### oh-my-posh
+
+Add a `text` segment to your theme JSON or YAML that reads the env var:
+
+```json
+{
+  "type": "text",
+  "template": "{{ .Env.TTH_PROMPT_TAGS }}"
+}
+```
+
+YAML equivalent:
+
+```yaml
+- type: text
+  template: "{{ .Env.TTH_PROMPT_TAGS }}"
+```
+
+See [oh-my-posh text segment docs](https://ohmyposh.dev/docs/segments/system/text).
+
+### Plain PS1 / PROMPT
+
+```zsh
+# zsh
+PROMPT="${TTH_PROMPT_TAGS} $PROMPT"
+```
+
+```bash
+# bash
+PS1="${TTH_PROMPT_TAGS} $PS1"
+```
+
+You can also run `tth prompt --framework <starship|powerlevel10k|oh-my-posh|generic>` to print the snippet for your framework, or just `tth prompt` to auto-detect.
+

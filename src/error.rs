@@ -14,6 +14,8 @@ pub enum ThothError {
     Tui(String),
     #[error("{0}")]
     Tag(String),
+    #[error("{0}")]
+    Prompt(String),
 }
 
 #[cfg(test)]

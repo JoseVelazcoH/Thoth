@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod database;
+pub mod doctor;
 pub mod error;
 pub mod export;
 pub mod forget;
@@ -7,6 +8,7 @@ pub mod hooks;
 pub mod logging;
 pub mod paths;
 pub mod project;
+pub mod prompt;
 pub mod recorder;
 pub mod schema;
 pub mod search;
