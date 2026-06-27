@@ -1719,4 +1719,47 @@ mod tests {
             .any(|l| l.contains("exit") && l.contains("command")));
         assert!(lines2.iter().all(|l| !l.contains("time")));
     }
+
+    #[test]
+    fn dump_sessions_tab_buffer() {
+        const NOW: i64 = 1_000_000_000;
+        const W: u16 = 100;
+        const H: u16 = 16;
+
+        let mut app = App::new();
+        app.tab = Tab::Sessions;
+        app.sessions = vec![
+            make_session("abc123def456", "proj-alpha", NOW - 3600, 5),
+            make_session("xyz789uvw012", "proj-beta", NOW - 7200, 3),
+        ];
+        app.session_selected = 0;
+        app.session_commands = vec![
+            make_row("git status", NOW - 3500, 0, "proj-alpha"),
+            make_row("cargo build --release", NOW - 3400, 0, "proj-alpha"),
+            make_row("cargo test", NOW - 3200, 1, "proj-alpha"),
+        ];
+
+        let cols = default_cols();
+        let backend = TestBackend::new(W, H);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ts = TableState::default();
+        terminal
+            .draw(|f| draw(f, &app, NOW, true, &cols, &mut ts))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut lines: Vec<String> = Vec::new();
+        for row in 0..H {
+            let mut line = String::new();
+            for col in 0..W {
+                line.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+            }
+            lines.push(line.trim_end().to_string());
+        }
+        let text = lines.join("\n");
+        println!("=== SESSIONS TAB (100x16) ===");
+        println!("{text}");
+
+        assert!(text.contains("sessions"), "must show sessions pane");
+        assert!(text.contains("commands"), "must show commands pane");
+    }
 }
