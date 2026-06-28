@@ -18,5 +18,6 @@ pub mod session;
 pub mod sessions;
 pub mod stats;
 pub mod tags;
+pub mod theme;
 pub mod tui;
 pub mod workspaces;
