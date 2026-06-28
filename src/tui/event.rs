@@ -59,12 +59,41 @@ pub enum Outcome {
     Exit,
 }
 
+fn handle_cmdline_key(key: KeyEvent, app: &mut App, now: i64) -> Outcome {
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        app.action = None;
+        return Outcome::Exit;
+    }
+    match key.code {
+        KeyCode::Enter => {
+            app.cmdline_submit(now);
+            Outcome::Continue
+        }
+        KeyCode::Esc => {
+            app.cmdline_cancel();
+            Outcome::Continue
+        }
+        KeyCode::Backspace => {
+            app.cmdline_backspace();
+            Outcome::Continue
+        }
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.cmdline_push(c);
+            Outcome::Continue
+        }
+        _ => Outcome::Continue,
+    }
+}
+
 pub fn handle_key(key: KeyEvent, app: &mut App, now: i64) -> Outcome {
     if app.confirm.is_some() {
         return handle_confirm_key(key, app);
     }
     if app.edit.is_some() {
         return handle_edit_key(key, app);
+    }
+    if app.cmdline.is_some() {
+        return handle_cmdline_key(key, app, now);
     }
     if app.show_help {
         app.show_help = false;
@@ -100,7 +129,7 @@ fn handle_history_key(key: KeyEvent, app: &mut App, now: i64) -> Outcome {
     }
 }
 
-fn handle_history_insert_key(key: KeyEvent, app: &mut App, now: i64) -> Outcome {
+fn handle_history_insert_key(key: KeyEvent, app: &mut App, _now: i64) -> Outcome {
     match key.code {
         KeyCode::Esc => {
             app.enter_normal_mode();
@@ -136,12 +165,12 @@ fn handle_history_insert_key(key: KeyEvent, app: &mut App, now: i64) -> Outcome 
         }
         KeyCode::Backspace => {
             app.query.pop();
-            app.apply_query(now);
+            app.recompute();
             Outcome::Continue
         }
         KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.query.push(c);
-            app.apply_query(now);
+            app.recompute();
             Outcome::Continue
         }
         _ => Outcome::Continue,
@@ -152,6 +181,10 @@ fn handle_history_normal_key(key: KeyEvent, app: &mut App) -> Outcome {
     match key.code {
         KeyCode::Char('?') => {
             app.show_help = true;
+            Outcome::Continue
+        }
+        KeyCode::Char(':') => {
+            app.open_cmdline();
             Outcome::Continue
         }
         KeyCode::Char('i') | KeyCode::Char('/') => {
@@ -938,7 +971,7 @@ mod tests {
     }
 
     #[test]
-    fn typing_dsl_filter_updates_filters_and_fuzzy_query() {
+    fn typing_in_insert_does_not_parse_dsl_filters() {
         let mut app = app_with_rows();
         for c in "project:thoth ".chars() {
             handle_key(key(KeyCode::Char(c)), &mut app, NOW);
@@ -946,13 +979,15 @@ mod tests {
         for c in "cargo".chars() {
             handle_key(key(KeyCode::Char(c)), &mut app, NOW);
         }
-        assert_eq!(app.filters.project, Some("thoth".into()));
-        assert_eq!(app.fuzzy_query, "cargo");
+        assert!(
+            app.filters.project.is_none(),
+            "typing in Insert must NOT parse DSL; filters.project must remain None"
+        );
         assert_eq!(app.query, "project:thoth cargo");
     }
 
     #[test]
-    fn backspace_updates_apply_query() {
+    fn backspace_removes_last_char_raw() {
         let mut app = app_with_rows();
         for c in "project:x".chars() {
             handle_key(key(KeyCode::Char(c)), &mut app, NOW);
@@ -985,8 +1020,100 @@ mod tests {
         for c in "git".chars() {
             handle_key(key(KeyCode::Char(c)), &mut app, NOW);
         }
-        assert_eq!(app.fuzzy_query, "git");
         assert_eq!(app.query, "git");
         assert!(!app.filtered.is_empty());
+    }
+
+    #[test]
+    fn normal_colon_opens_cmdline() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        let outcome = handle_key(key(KeyCode::Char(':')), &mut app, NOW);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert_eq!(app.cmdline, Some(String::new()));
+    }
+
+    #[test]
+    fn cmdline_open_typing_appends_to_buffer_not_query() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        handle_key(key(KeyCode::Char(':')), &mut app, NOW);
+        assert!(app.cmdline.is_some());
+        let query_before = app.query.clone();
+        handle_key(key(KeyCode::Char('p')), &mut app, NOW);
+        assert_eq!(
+            app.query, query_before,
+            "typing while cmdline is open must not change query"
+        );
+        assert_eq!(app.cmdline, Some("p".to_string()));
+    }
+
+    #[test]
+    fn cmdline_enter_applies_and_closes() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        handle_key(key(KeyCode::Char(':')), &mut app, NOW);
+        for c in "project:thoth".chars() {
+            handle_key(key(KeyCode::Char(c)), &mut app, NOW);
+        }
+        let outcome = handle_key(key(KeyCode::Enter), &mut app, NOW);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert!(app.cmdline.is_none(), "Enter must close cmdline");
+        assert_eq!(app.filters.project, Some("thoth".into()));
+    }
+
+    #[test]
+    fn cmdline_esc_cancels_without_applying() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        handle_key(key(KeyCode::Char(':')), &mut app, NOW);
+        for c in "project:thoth".chars() {
+            handle_key(key(KeyCode::Char(c)), &mut app, NOW);
+        }
+        let outcome = handle_key(key(KeyCode::Esc), &mut app, NOW);
+        assert!(matches!(outcome, Outcome::Continue));
+        assert!(app.cmdline.is_none(), "Esc must close cmdline");
+        assert!(app.filters.project.is_none(), "Esc must not apply filters");
+    }
+
+    #[test]
+    fn cmdline_ctrl_c_exits() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        handle_key(key(KeyCode::Char(':')), &mut app, NOW);
+        let outcome = handle_key(ctrl(KeyCode::Char('c')), &mut app, NOW);
+        assert!(
+            matches!(outcome, Outcome::Exit),
+            "Ctrl-C must exit from cmdline"
+        );
+    }
+
+    #[test]
+    fn cmdline_left_right_tab_do_not_leak() {
+        let mut app = app_with_rows();
+        app.enter_normal_mode();
+        handle_key(key(KeyCode::Char(':')), &mut app, NOW);
+        let tab_before = app.tab;
+        handle_key(key(KeyCode::Left), &mut app, NOW);
+        handle_key(key(KeyCode::Right), &mut app, NOW);
+        handle_key(key(KeyCode::Tab), &mut app, NOW);
+        assert_eq!(
+            app.tab, tab_before,
+            "Left/Right/Tab must not leak while cmdline is open"
+        );
+        assert!(app.cmdline.is_some(), "cmdline must still be open");
+    }
+
+    #[test]
+    fn insert_typing_project_word_does_not_set_filter_regression() {
+        let mut app = app_with_rows();
+        assert_eq!(app.mode, Mode::Insert);
+        for c in "project".chars() {
+            handle_key(key(KeyCode::Char(c)), &mut app, NOW);
+        }
+        assert!(
+            app.filters.project.is_none(),
+            "typing 'project' in Insert mode must NOT set a project filter"
+        );
     }
 }
