@@ -1,5 +1,6 @@
 command -v tth >/dev/null 2>&1 || return
 
+zmodload zsh/datetime 2>/dev/null
 autoload -Uz add-zsh-hook
 
 : ${TTH_SESSION_ID:=$(tth new-session-id)}
@@ -17,7 +18,7 @@ _tth_preexec() {
 _tth_precmd() {
     local _TTH_EXIT=$?
     [[ -n $_TTH_CMD ]] || return
-    local _dur=$(( int((EPOCHREALTIME - _TTH_START) * 1000) ))
+    local _dur=$(printf '%.0f' "$(( (EPOCHREALTIME - _TTH_START) * 1000 ))")
     tth record \
         --cmd "$_TTH_CMD" \
         --dir "$PWD" \
