@@ -27,7 +27,7 @@ This project follows [Conventional Commits 1.0.0](https://www.conventionalcommit
 | `feat`     | A new feature visible to the user or CLI consumer        |
 | `fix`      | A bug fix                                                |
 | `docs`     | Documentation only changes                               |
-| `style`    | Formatting, whitespace — no logic change                 |
+| `style`    | Formatting, whitespace - no logic change                 |
 | `refactor` | Code change that is neither a fix nor a feature          |
 | `perf`     | Performance improvement                                  |
 | `test`     | Adding or updating tests                                 |

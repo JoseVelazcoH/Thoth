@@ -1,0 +1,40 @@
+[package]
+name = "thoth"
+version = "0.1.0"
+edition = "2021"
+description = "An intelligent shell history that captures commands with context and makes them searchable"
+license = "MIT"
+repository = "https://github.com/JoseVelazcoH/Thoth"
+readme = "README.md"
+keywords = ["shell", "history", "cli", "tui", "search"]
+categories = ["command-line-utilities"]
+rust-version = "1.74"
+
+[[bin]]
+name = "tth"
+path = "src/main.rs"
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+comfy-table = "7"
+ratatui = "0.29"
+crossterm = "0.28"
+nucleo-matcher = "0.3"
+toml_edit = "0.22"
+regex = "1"
+
+[dev-dependencies]
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

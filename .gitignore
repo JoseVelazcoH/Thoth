@@ -87,3 +87,8 @@ logs/
 
 # Hatch
 .hatch/
+
+
+# Added by cargo
+
+/target
