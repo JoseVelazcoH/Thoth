@@ -7,16 +7,13 @@ use ratatui::{
 };
 
 use crate::search::{Column, CommandRow};
+use crate::theme::Theme;
 use crate::tui::app::{App, Confirm, Mode, Tab, WsPane};
 use crate::tui::time::format_relative;
 use crate::workspaces::WorkspaceRow;
 
-const ACCENT: Color = Color::Cyan;
-const SELECTION_BG: Color = Color::Indexed(147);
-const DIM_COLOR: Color = Color::DarkGray;
 const EDIT_MODAL_W: u16 = 60;
 const EDIT_MODAL_H: u16 = 5;
-const BORDER_COLOR: Color = Color::DarkGray;
 
 pub fn display_command(raw: &str) -> String {
     let collapsed: String = raw
@@ -53,11 +50,19 @@ fn format_duration(ms: i64) -> String {
     }
 }
 
-fn exit_text(exit_code: i64) -> (&'static str, Color) {
+fn exit_color(exit_code: i64, theme: &Theme) -> Color {
     if exit_code == 0 {
-        ("ok", Color::Green)
+        theme.ok
     } else {
-        ("fail", Color::Red)
+        theme.fail
+    }
+}
+
+fn exit_label(exit_code: i64) -> &'static str {
+    if exit_code == 0 {
+        "ok"
+    } else {
+        "fail"
     }
 }
 
@@ -130,7 +135,7 @@ fn col_text(col: &Column, row: &CommandRow, now: i64) -> String {
     match col {
         Column::Timestamp => format_relative(row.timestamp, now),
         Column::Duration => format_duration(row.duration_ms),
-        Column::Exit => exit_text(row.exit_code).0.to_string(),
+        Column::Exit => exit_label(row.exit_code).to_string(),
         Column::Project => row.project.clone(),
         Column::Command => display_command(&row.command),
         Column::Tags => row.tags.clone(),
@@ -138,16 +143,16 @@ fn col_text(col: &Column, row: &CommandRow, now: i64) -> String {
     }
 }
 
-fn tui_cell(col: &Column, row: &CommandRow, now: i64, width: u16) -> Cell<'static> {
+fn tui_cell(col: &Column, row: &CommandRow, now: i64, width: u16, theme: &Theme) -> Cell<'static> {
     let text = truncate(&col_text(col, row, now), width as usize);
     let style = match col {
-        Column::Timestamp => Style::default().fg(DIM_COLOR),
-        Column::Duration => Style::default().fg(ACCENT),
-        Column::Exit => Style::default().fg(exit_text(row.exit_code).1),
-        Column::Project => Style::default().fg(Color::Blue),
-        Column::Directory => Style::default().fg(DIM_COLOR),
-        Column::Command => Style::default(),
-        Column::Tags => Style::default(),
+        Column::Timestamp => Style::default().fg(theme.dim),
+        Column::Duration => Style::default().fg(theme.accent),
+        Column::Exit => Style::default().fg(exit_color(row.exit_code, theme)),
+        Column::Project => Style::default().fg(theme.project),
+        Column::Directory => Style::default().fg(theme.directory),
+        Column::Command => Style::default().fg(theme.command),
+        Column::Tags => Style::default().fg(theme.tags),
     };
     Cell::from(Line::from(vec![Span::styled(text, style)]))
 }
@@ -169,10 +174,11 @@ pub fn resolve_tui_columns(names: &[String]) -> Vec<Column> {
 }
 
 fn render_tab_bar(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
-    let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
+    let theme = &app.theme;
+    let dim_style = Style::default().fg(theme.dim).add_modifier(Modifier::DIM);
     let active_style = Style::default()
-        .bg(SELECTION_BG)
-        .fg(Color::Black)
+        .bg(theme.selection_bg)
+        .fg(theme.selection_fg)
         .add_modifier(Modifier::BOLD);
 
     let (history_style, workspaces_style) = match app.tab {
@@ -197,8 +203,9 @@ fn render_history_pane(
     columns: &[Column],
     table_state: &mut TableState,
 ) {
-    let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
-    let border_style = Style::default().fg(BORDER_COLOR);
+    let theme = &app.theme;
+    let dim_style = Style::default().fg(theme.dim).add_modifier(Modifier::DIM);
+    let border_style = Style::default().fg(theme.border);
 
     let list_block = Block::default()
         .borders(Borders::ALL)
@@ -273,7 +280,7 @@ fn render_history_pane(
                     } else {
                         content_w[i]
                     };
-                    tui_cell(col, row, now, w)
+                    tui_cell(col, row, now, w, theme)
                 })
                 .collect();
             Row::new(cells)
@@ -281,7 +288,7 @@ fn render_history_pane(
         .collect();
 
     let table_header_style = Style::default()
-        .fg(DIM_COLOR)
+        .fg(theme.dim)
         .add_modifier(Modifier::DIM)
         .add_modifier(Modifier::BOLD);
     let header_cells: Vec<Cell> = columns
@@ -291,8 +298,8 @@ fn render_history_pane(
     let table_header = Row::new(header_cells);
 
     let highlight_style = Style::default()
-        .bg(SELECTION_BG)
-        .fg(Color::Black)
+        .bg(theme.selection_bg)
+        .fg(theme.selection_fg)
         .add_modifier(Modifier::BOLD);
 
     let table = Table::new(rows, widths)
@@ -321,15 +328,16 @@ fn render_workspaces_pane(
     table_state: &mut TableState,
     cmd_table_state: &mut TableState,
 ) {
-    let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
+    let theme = &app.theme;
+    let dim_style = Style::default().fg(theme.dim).add_modifier(Modifier::DIM);
     let highlight_style = Style::default()
-        .bg(SELECTION_BG)
-        .fg(Color::Black)
+        .bg(theme.selection_bg)
+        .fg(theme.selection_fg)
         .add_modifier(Modifier::BOLD);
 
     let list_focused = app.ws_pane == WsPane::List;
-    let accent_border = Style::default().fg(ACCENT);
-    let dim_border = Style::default().fg(BORDER_COLOR);
+    let accent_border = Style::default().fg(theme.accent);
+    let dim_border = Style::default().fg(theme.border);
 
     let h_chunks = Layout::horizontal([Constraint::Percentage(38), Constraint::Min(1)]).split(area);
 
@@ -347,7 +355,7 @@ fn render_workspaces_pane(
         .title(Span::styled(
             " workspaces ",
             if list_focused {
-                Style::default().fg(ACCENT)
+                Style::default().fg(theme.accent)
             } else {
                 dim_style
             },
@@ -360,7 +368,11 @@ fn render_workspaces_pane(
         let empty = Paragraph::new("no workspaces").style(dim_style);
         frame.render_widget(empty, inner_left);
     } else {
-        let rows: Vec<Row> = app.workspaces.iter().map(|w| ws_row(w, now)).collect();
+        let rows: Vec<Row> = app
+            .workspaces
+            .iter()
+            .map(|w| ws_row(w, now, theme))
+            .collect();
 
         let widths = vec![
             Constraint::Min(1),
@@ -388,7 +400,7 @@ fn render_workspaces_pane(
         .title(Span::styled(
             " commands ",
             if commands_focused {
-                Style::default().fg(ACCENT)
+                Style::default().fg(theme.accent)
             } else {
                 dim_style
             },
@@ -406,16 +418,15 @@ fn render_workspaces_pane(
             .iter()
             .map(|cmd| {
                 let time_text = truncate(&format_relative(cmd.timestamp, now), 9);
-                let exit_text_val = exit_text(cmd.exit_code);
                 let cmd_text = truncate(
                     &display_command(&cmd.command),
                     inner_right.width.saturating_sub(16) as usize,
                 );
                 Row::new(vec![
-                    Cell::from(Span::styled(time_text, Style::default().fg(DIM_COLOR))),
+                    Cell::from(Span::styled(time_text, Style::default().fg(theme.dim))),
                     Cell::from(Span::styled(
-                        exit_text_val.0,
-                        Style::default().fg(exit_text_val.1),
+                        exit_label(cmd.exit_code),
+                        Style::default().fg(exit_color(cmd.exit_code, theme)),
                     )),
                     Cell::from(cmd_text),
                 ])
@@ -441,14 +452,14 @@ fn render_workspaces_pane(
     }
 }
 
-fn ws_row(w: &WorkspaceRow, now: i64) -> Row<'static> {
+fn ws_row(w: &WorkspaceRow, now: i64, theme: &Theme) -> Row<'static> {
     let name_text = truncate(&w.name, 20);
     let count_text = w.command_count.to_string();
     let last_text = truncate(&format_relative(w.last_ts, now), 9);
     Row::new(vec![
-        Cell::from(Span::styled(name_text, Style::default().fg(Color::Blue))),
-        Cell::from(Span::styled(count_text, Style::default().fg(DIM_COLOR))),
-        Cell::from(Span::styled(last_text, Style::default().fg(DIM_COLOR))),
+        Cell::from(Span::styled(name_text, Style::default().fg(theme.project))),
+        Cell::from(Span::styled(count_text, Style::default().fg(theme.dim))),
+        Cell::from(Span::styled(last_text, Style::default().fg(theme.dim))),
     ])
 }
 
@@ -501,13 +512,14 @@ pub fn draw_with_cmd_state(
 
     render_tab_bar(frame, tabbar_area, app);
 
+    let theme = &app.theme;
     let version = env!("CARGO_PKG_VERSION");
     let accent_style = Style::default()
-        .fg(Color::Green)
+        .fg(theme.controls)
         .add_modifier(Modifier::BOLD);
-    let dim_style = Style::default().fg(DIM_COLOR).add_modifier(Modifier::DIM);
+    let dim_style = Style::default().fg(theme.dim).add_modifier(Modifier::DIM);
     let green_bold = Style::default()
-        .fg(Color::Green)
+        .fg(theme.header)
         .add_modifier(Modifier::BOLD);
 
     let accent_bar = Span::styled("▌ ", green_bold);
@@ -557,7 +569,7 @@ pub fn draw_with_cmd_state(
         render_confirm_modal(frame, middle_area, app);
     }
     if let Some(ref es) = app.edit {
-        render_edit_modal(frame, middle_area, es);
+        render_edit_modal(frame, middle_area, es, theme);
     }
 
     let query_text = format!("> {}", app.query);
@@ -677,8 +689,11 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 
 fn render_confirm_modal(frame: &mut Frame, area: Rect, app: &crate::tui::app::App) {
     let Some(confirm) = &app.confirm else { return };
-    let dim_style = Style::default().fg(DIM_COLOR);
-    let accent_style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+    let theme = &app.theme;
+    let dim_style = Style::default().fg(theme.dim);
+    let accent_style = Style::default()
+        .fg(theme.accent)
+        .add_modifier(Modifier::BOLD);
 
     let modal_w = 50u16;
     let modal_h = 4u16;
@@ -693,7 +708,7 @@ fn render_confirm_modal(frame: &mut Frame, area: Rect, app: &crate::tui::app::Ap
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(ACCENT))
+                .border_style(Style::default().fg(theme.accent))
                 .title(Span::styled(title, accent_style));
 
             let inner = block.inner(modal_area);
@@ -736,9 +751,16 @@ fn render_confirm_modal(frame: &mut Frame, area: Rect, app: &crate::tui::app::Ap
     }
 }
 
-fn render_edit_modal(frame: &mut Frame, area: Rect, es: &crate::tui::app::EditState) {
-    let dim_style = Style::default().fg(DIM_COLOR);
-    let accent_style = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+fn render_edit_modal(
+    frame: &mut Frame,
+    area: Rect,
+    es: &crate::tui::app::EditState,
+    theme: &Theme,
+) {
+    let dim_style = Style::default().fg(theme.dim);
+    let accent_style = Style::default()
+        .fg(theme.accent)
+        .add_modifier(Modifier::BOLD);
 
     let modal_area = centered_rect(EDIT_MODAL_W, EDIT_MODAL_H, area);
     frame.render_widget(Clear, modal_area);
@@ -746,7 +768,7 @@ fn render_edit_modal(frame: &mut Frame, area: Rect, es: &crate::tui::app::EditSt
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(ACCENT))
+        .border_style(Style::default().fg(theme.accent))
         .title(Span::styled(" Edit command ", accent_style));
 
     let inner = block.inner(modal_area);
@@ -774,6 +796,7 @@ fn render_edit_modal(frame: &mut Frame, area: Rect, es: &crate::tui::app::EditSt
 mod tests {
     use super::*;
     use crate::config::default_tui_columns;
+    use crate::theme::Theme;
     use crate::tui::app::{Action, App, Confirm, ConfirmDelete, DeleteOrigin, Tab, WsPane};
     use crate::workspaces::WorkspaceRow;
     use ratatui::backend::TestBackend;
@@ -885,7 +908,7 @@ mod tests {
         let buf = render_app_buf(&app);
 
         let active_bg_count = (0..TEST_WIDTH)
-            .filter(|&x| buf[(x, 0)].style().bg == Some(SELECTION_BG))
+            .filter(|&x| buf[(x, 0)].style().bg == Some(Theme::default().selection_bg))
             .count();
 
         assert!(
@@ -956,8 +979,10 @@ mod tests {
         let app = app_with_workspaces();
         let buf = render_app_buf(&app);
 
-        let any_cyan_bg = (0..TEST_HEIGHT)
-            .any(|row_y| (0..TEST_WIDTH).any(|x| buf[(x, row_y)].style().bg == Some(SELECTION_BG)));
+        let any_cyan_bg = (0..TEST_HEIGHT).any(|row_y| {
+            (0..TEST_WIDTH)
+                .any(|x| buf[(x, row_y)].style().bg == Some(Theme::default().selection_bg))
+        });
         assert!(
             any_cyan_bg,
             "Workspaces tab must have bg=Cyan on selected row"
@@ -1151,8 +1176,10 @@ mod tests {
 
         let buf = render_app_buf(&app);
 
-        let any_cyan_bg = (0..TEST_HEIGHT)
-            .any(|row_y| (0..TEST_WIDTH).any(|x| buf[(x, row_y)].style().bg == Some(SELECTION_BG)));
+        let any_cyan_bg = (0..TEST_HEIGHT).any(|row_y| {
+            (0..TEST_WIDTH)
+                .any(|x| buf[(x, row_y)].style().bg == Some(Theme::default().selection_bg))
+        });
         assert!(
             any_cyan_bg,
             "selected row must have bg=Cyan highlight somewhere in the frame"
@@ -1669,8 +1696,8 @@ mod tests {
         height: u16,
     ) -> Option<String> {
         for row in 0..height {
-            let any_cyan_bg =
-                (0..width).any(|col| buf[(col, row)].style().bg == Some(SELECTION_BG));
+            let any_cyan_bg = (0..width)
+                .any(|col| buf[(col, row)].style().bg == Some(Theme::default().selection_bg));
             if any_cyan_bg {
                 let line: String = (0..width)
                     .map(|col| buf[(col, row)].symbol().chars().next().unwrap_or(' '))
@@ -2069,7 +2096,7 @@ mod tests {
         let list_pane_area_x = 1u16;
         let any_accent_in_left_border = (0..TEST_HEIGHT).any(|row_y| {
             let cell = &buf[(list_pane_area_x, row_y)];
-            cell.style().fg == Some(ACCENT)
+            cell.style().fg == Some(Theme::default().accent)
         });
         assert!(
             any_accent_in_left_border,
@@ -2085,7 +2112,7 @@ mod tests {
         let cmd_pane_x = (TEST_WIDTH as f32 * 0.38) as u16 + 1;
         let any_accent_in_cmd_border = (0..TEST_HEIGHT).any(|row_y| {
             let cell = &buf[(cmd_pane_x, row_y)];
-            cell.style().fg == Some(ACCENT)
+            cell.style().fg == Some(Theme::default().accent)
         });
         assert!(
             any_accent_in_cmd_border,

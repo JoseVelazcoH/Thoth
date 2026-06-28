@@ -76,6 +76,11 @@ pub fn run(
 
     let mut app = App::new();
     app.reload(conn, now)?;
+
+    let themes_dir = crate::config::resolve_themes_dir();
+    let cfg_theme = crate::config::load().theme;
+    app.theme = crate::config::resolve_theme(&cfg_theme.name, &themes_dir);
+
     let mut table_state = TableState::default();
 
     loop {
