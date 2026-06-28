@@ -125,10 +125,7 @@ mod tests {
 
     #[test]
     fn query_matches_project_not_in_command_or_tags() {
-        let items = vec![
-            row_with_project("ls -la", "myproject"),
-            row("git status"),
-        ];
+        let items = vec![row_with_project("ls -la", "myproject"), row("git status")];
         let result = rank("myproject", &items);
         assert!(
             result.contains(&0),
