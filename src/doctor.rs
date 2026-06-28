@@ -29,6 +29,7 @@ pub struct DoctorInputs {
     pub framework_config_text: Option<String>,
     pub config_path: PathBuf,
     pub config_present: bool,
+    pub theme_name: String,
 }
 
 pub struct DbInfo {
@@ -105,6 +106,12 @@ pub fn run_doctor(inputs: &DoctorInputs) -> DoctorReport {
     checks.push(Check {
         status: CheckStatus::Ok,
         name: format!("config  {} ({})", inputs.config_path.display(), status_str),
+        guidance: None,
+    });
+
+    checks.push(Check {
+        status: CheckStatus::Ok,
+        name: format!("theme  {}", inputs.theme_name),
         guidance: None,
     });
 
@@ -190,6 +197,7 @@ mod tests {
             framework_config_text: config.map(|s| s.to_string()),
             config_path: std::path::PathBuf::from("/home/user/.config/thoth/config.toml"),
             config_present: false,
+            theme_name: "default".to_string(),
         }
     }
 

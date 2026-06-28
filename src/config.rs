@@ -9,6 +9,7 @@ const VALID_KEYS: &[(&str, &str)] = &[
     ("session.gap_minutes", "positive integer"),
     ("tui.orientation", r#""bottom" or "top""#),
     ("search.default_limit", "positive integer"),
+    ("theme.name", "theme name string"),
 ];
 
 pub const DEFAULT_CONFIG_TOML: &str = r#"# Thoth configuration. All settings are optional; values shown are the defaults.
@@ -405,6 +406,9 @@ pub fn apply_set(existing_toml: &str, key: &str, value: &str) -> Result<String, 
                 .into_value()
                 .map_err(|e| ThothError::Config(format!("toml_edit error: {}", e)))?
         }
+        "theme.name" => toml_edit::value(value)
+            .into_value()
+            .map_err(|e| ThothError::Config(format!("toml_edit error: {}", e)))?,
         _ => {
             return Err(ThothError::Config(format!(
                 "unknown key '{}'; valid keys: {}",
@@ -443,6 +447,35 @@ pub fn write_set(key: &str, value: &str) -> Result<(), ThothError> {
     }
     std::fs::write(&path, new_toml)?;
     Ok(())
+}
+
+pub fn list_user_theme_names(themes_dir: &Path) -> Vec<String> {
+    let entries = match std::fs::read_dir(themes_dir) {
+        Ok(e) => e,
+        Err(_) => return vec![],
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|e| {
+            let entry = e.ok()?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("toml") {
+                path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    names.sort();
+    names
+}
+
+pub fn theme_exists(name: &str, themes_dir: &Path) -> bool {
+    if crate::theme::builtin(name).is_some() {
+        return true;
+    }
+    themes_dir.join(format!("{name}.toml")).exists()
 }
 
 pub fn ensure_default_config(path: &Path) -> Result<bool, ThothError> {
@@ -834,6 +867,49 @@ mod tests {
         let home = Path::new("/home/user");
         let dir = themes_dir_from(Some("/custom/thoth/config.toml"), None, home);
         assert_eq!(dir, PathBuf::from("/custom/thoth/themes"));
+    }
+
+    #[test]
+    fn list_user_theme_names_returns_sorted_toml_stems() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("mine.toml"), "").unwrap();
+        std::fs::write(dir.path().join("other.toml"), "").unwrap();
+        std::fs::write(dir.path().join("readme.txt"), "").unwrap();
+        let names = list_user_theme_names(dir.path());
+        assert_eq!(names, vec!["mine", "other"]);
+    }
+
+    #[test]
+    fn list_user_theme_names_missing_dir_returns_empty() {
+        let names = list_user_theme_names(std::path::Path::new("/nonexistent/path/themes"));
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn theme_exists_builtin_name_returns_true() {
+        let dir = TempDir::new().unwrap();
+        assert!(theme_exists("mocha", dir.path()));
+        assert!(theme_exists("default", dir.path()));
+    }
+
+    #[test]
+    fn theme_exists_file_in_dir_returns_true() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("mine.toml"), "").unwrap();
+        assert!(theme_exists("mine", dir.path()));
+    }
+
+    #[test]
+    fn theme_exists_unknown_returns_false() {
+        let dir = TempDir::new().unwrap();
+        assert!(!theme_exists("does-not-exist", dir.path()));
+    }
+
+    #[test]
+    fn apply_set_theme_name_works() {
+        let result = apply_set("", "theme.name", "mocha").unwrap();
+        assert!(result.contains("[theme]"));
+        assert!(result.contains("name = \"mocha\""));
     }
 
     #[test]
