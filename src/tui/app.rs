@@ -174,6 +174,7 @@ pub enum Action {
 pub struct App {
     pub query: String,
     pub fuzzy_query: String,
+    pub cmdline: Option<String>,
     pub all_rows: Vec<CommandRow>,
     pub filtered: Vec<usize>,
     pub selected: usize,
@@ -209,6 +210,7 @@ impl App {
         Self {
             query: String::new(),
             fuzzy_query: String::new(),
+            cmdline: None,
             all_rows: vec![],
             filtered: vec![],
             selected: 0,
@@ -389,7 +391,7 @@ impl App {
     }
 
     pub fn recompute(&mut self) {
-        self.filtered = fuzzy::rank(&self.fuzzy_query, &self.all_rows);
+        self.filtered = fuzzy::rank(&self.query, &self.all_rows);
         let max = self.filtered.len().saturating_sub(1);
         if self.selected > max {
             self.selected = max;
@@ -400,7 +402,43 @@ impl App {
         let (filters, free) = parse_query(&self.query, now);
         let changed = filters != self.filters;
         self.filters = filters;
-        self.fuzzy_query = free;
+        self.fuzzy_query = free.clone();
+        self.query = free;
+        if changed {
+            self.needs_history_reload = true;
+        }
+        self.recompute();
+    }
+
+    pub fn open_cmdline(&mut self) {
+        self.cmdline = Some(String::new());
+    }
+
+    pub fn cmdline_push(&mut self, c: char) {
+        if let Some(ref mut buf) = self.cmdline {
+            buf.push(c);
+        }
+    }
+
+    pub fn cmdline_backspace(&mut self) {
+        if let Some(ref mut buf) = self.cmdline {
+            buf.pop();
+        }
+    }
+
+    pub fn cmdline_cancel(&mut self) {
+        self.cmdline = None;
+    }
+
+    pub fn cmdline_submit(&mut self, now: i64) {
+        let buf = match self.cmdline.take() {
+            Some(b) => b,
+            None => return,
+        };
+        let (filters, free) = parse_query(&buf, now);
+        let changed = filters != self.filters;
+        self.filters = filters;
+        self.query = free;
         if changed {
             self.needs_history_reload = true;
         }
@@ -761,7 +799,6 @@ mod tests {
         let mut app = App::new();
         app.reload(&conn, 9999).unwrap();
         app.query = "docker".into();
-        app.fuzzy_query = "docker".into();
         app.recompute();
         assert_eq!(app.filtered.len(), 1);
         assert_eq!(app.all_rows[app.filtered[0]].command, "docker run nginx");
@@ -1197,7 +1234,10 @@ mod tests {
         app.apply_query(PARSE_NOW);
         assert_eq!(app.filters.project, Some("myapp".into()));
         assert!(app.needs_history_reload);
-        assert!(app.fuzzy_query.is_empty());
+        assert!(
+            app.query.is_empty(),
+            "query must become the free text after parsing"
+        );
     }
 
     #[test]
@@ -1206,11 +1246,11 @@ mod tests {
         app.query = "cargo".into();
         app.apply_query(PARSE_NOW);
         assert!(!app.needs_history_reload);
-        assert_eq!(app.fuzzy_query, "cargo");
+        assert_eq!(app.query, "cargo");
     }
 
     #[test]
-    fn apply_query_recompute_uses_fuzzy_query() {
+    fn apply_query_recompute_uses_free_text_as_query() {
         let conn = make_conn();
         seed(&conn, "docker run nginx", 1000);
         seed(&conn, "ls -la", 2000);
@@ -1228,6 +1268,118 @@ mod tests {
         fs.duration = Some(">30".into());
         let args = fs.to_search_args();
         assert_eq!(args.duration, Some(">30".into()));
+    }
+
+    const CMDLINE_NOW: i64 = 1_700_000_000;
+
+    #[test]
+    fn open_cmdline_sets_some_empty_string() {
+        let mut app = App::new();
+        assert!(app.cmdline.is_none());
+        app.open_cmdline();
+        assert_eq!(app.cmdline, Some(String::new()));
+    }
+
+    #[test]
+    fn cmdline_push_appends_char() {
+        let mut app = App::new();
+        app.open_cmdline();
+        app.cmdline_push('p');
+        app.cmdline_push(':');
+        assert_eq!(app.cmdline, Some("p:".to_string()));
+    }
+
+    #[test]
+    fn cmdline_backspace_removes_last_char() {
+        let mut app = App::new();
+        app.open_cmdline();
+        app.cmdline_push('a');
+        app.cmdline_push('b');
+        app.cmdline_backspace();
+        assert_eq!(app.cmdline, Some("a".to_string()));
+    }
+
+    #[test]
+    fn cmdline_cancel_closes_without_applying() {
+        let mut app = App::new();
+        app.filters.project = Some("old".into());
+        app.open_cmdline();
+        app.cmdline_push('p');
+        app.cmdline_push(':');
+        app.cmdline_push('x');
+        app.cmdline_cancel();
+        assert!(app.cmdline.is_none());
+        assert_eq!(
+            app.filters.project,
+            Some("old".into()),
+            "cancel must not change filters"
+        );
+    }
+
+    #[test]
+    fn cmdline_submit_project_and_free_text() {
+        let conn = make_conn();
+        seed(&conn, "docker run nginx", 1000);
+        seed(&conn, "ls -la", 2000);
+        let mut app = App::new();
+        app.reload(&conn, 9999).unwrap();
+        app.open_cmdline();
+        for c in "project:thoth cargo".chars() {
+            app.cmdline_push(c);
+        }
+        app.cmdline_submit(CMDLINE_NOW);
+        assert_eq!(app.filters.project, Some("thoth".into()));
+        assert_eq!(app.query, "cargo");
+        assert!(app.needs_history_reload);
+        assert!(app.cmdline.is_none());
+    }
+
+    #[test]
+    fn cmdline_submit_only_free_text_does_not_set_reload() {
+        let mut app = App::new();
+        app.open_cmdline();
+        for c in "cargo".chars() {
+            app.cmdline_push(c);
+        }
+        app.cmdline_submit(CMDLINE_NOW);
+        assert_eq!(app.query, "cargo");
+        assert!(
+            !app.needs_history_reload,
+            "free-text only must not trigger reload"
+        );
+        assert!(app.cmdline.is_none());
+    }
+
+    #[test]
+    fn cmdline_submit_empty_clears_filters() {
+        let mut app = App::new();
+        app.filters.project = Some("myapp".into());
+        app.needs_history_reload = false;
+        app.open_cmdline();
+        app.cmdline_submit(CMDLINE_NOW);
+        assert!(
+            app.filters.project.is_none(),
+            "empty submit must clear filters"
+        );
+        assert_eq!(app.query, "");
+        assert!(
+            app.needs_history_reload,
+            "clearing filters must trigger reload"
+        );
+        assert!(app.cmdline.is_none());
+    }
+
+    #[test]
+    fn recompute_ranks_on_raw_query() {
+        let conn = make_conn();
+        seed(&conn, "git status", 2000);
+        seed(&conn, "ls -la", 1000);
+        let mut app = App::new();
+        app.reload(&conn, 9999).unwrap();
+        app.query = "git".into();
+        app.recompute();
+        assert!(!app.filtered.is_empty());
+        assert_eq!(app.all_rows[app.filtered[0]].command, "git status");
     }
 
     #[test]
