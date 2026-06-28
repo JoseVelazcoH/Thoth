@@ -63,6 +63,8 @@ pub enum Cmd {
     Workspace(WorkspaceArgs),
     #[command(about = "List recorded workspaces with command counts")]
     Workspaces,
+    #[command(about = "Show, list, or switch the TUI theme")]
+    Theme(ThemeArgs),
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -293,6 +295,12 @@ pub struct UninstallArgs {
         help = "Path to the rc file to modify (default: ~/.bashrc or ~/.zshrc)"
     )]
     pub rc_file: Option<PathBuf>,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ThemeArgs {
+    #[arg(help = "Theme name to switch to, or 'list' to list available themes")]
+    pub name: Option<String>,
 }
 
 pub fn run() -> Result<(), crate::error::ThothError> {
@@ -601,6 +609,7 @@ pub fn run() -> Result<(), crate::error::ThothError> {
             let framework_config_text = read_framework_config(&framework, &home);
             let config_path = crate::config::resolve_config_path();
             let config_present = config_path.exists();
+            let theme_name = crate::config::load().theme.name;
             let inputs = crate::doctor::DoctorInputs {
                 hooks_installed,
                 db_result,
@@ -609,6 +618,7 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                 framework_config_text,
                 config_path,
                 config_present,
+                theme_name,
             };
             let report = crate::doctor::run_doctor(&inputs);
             print!("{}", crate::doctor::render_report(&report));
@@ -673,6 +683,50 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                     table.add_row(vec![row.name.clone(), row.command_count.to_string(), last]);
                 }
                 println!("{table}");
+            }
+        }
+        Some(Cmd::Theme(args)) => {
+            let cfg = crate::config::load();
+            let themes_dir = crate::config::resolve_themes_dir();
+            match args.name.as_deref() {
+                None => {
+                    println!("Current theme: {}", cfg.theme.name);
+                }
+                Some("list") => {
+                    let current = &cfg.theme.name;
+                    println!("Built-in themes:");
+                    for name in crate::theme::builtin_names() {
+                        if *name == current.as_str() {
+                            println!("  {} (current)", name);
+                        } else {
+                            println!("  {}", name);
+                        }
+                    }
+                    let user_themes = crate::config::list_user_theme_names(&themes_dir);
+                    if !user_themes.is_empty() {
+                        println!("User themes:");
+                        for name in &user_themes {
+                            if name == current {
+                                println!("  {} (current)", name);
+                            } else {
+                                println!("  {}", name);
+                            }
+                        }
+                    }
+                }
+                Some(name) => {
+                    if !crate::config::theme_exists(name, &themes_dir) {
+                        let builtin_list = crate::theme::builtin_names().join(", ");
+                        return Err(crate::error::ThothError::Config(format!(
+                            "unknown theme '{}'; built-in themes: {}; user themes go in {}",
+                            name,
+                            builtin_list,
+                            themes_dir.display()
+                        )));
+                    }
+                    crate::config::write_set("theme.name", name)?;
+                    println!("Theme set to '{}'. Reopen the TUI to see it.", name);
+                }
             }
         }
     }
