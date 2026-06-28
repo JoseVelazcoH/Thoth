@@ -37,8 +37,8 @@ pub fn build_query(
     let mut params: Vec<Box<dyn ToSql>> = Vec::new();
 
     if let Some(ref p) = args.project {
-        fragments.push("c.project = ?".to_string());
-        params.push(Box::new(p.clone()));
+        fragments.push("c.project LIKE ?".to_string());
+        params.push(Box::new(format!("%{p}%")));
     }
 
     match &args.exit {
@@ -63,7 +63,9 @@ pub fn build_query(
     }
 
     for tag in &args.tag {
-        fragments.push("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE value = ?)".to_string());
+        fragments.push(
+            "EXISTS(SELECT 1 FROM json_each(c.tags) WHERE LOWER(value) = LOWER(?))".to_string(),
+        );
         params.push(Box::new(tag.clone()));
     }
 
@@ -275,7 +277,7 @@ mod tests {
             ..default_args()
         };
         let (sql, params) = build_query(&args, FIXED_NOW).unwrap();
-        assert!(sql.contains("c.project = ?"));
+        assert!(sql.contains("c.project LIKE ?"));
         assert!(sql.contains("ORDER BY c.timestamp ASC"));
         assert!(!sql.contains("LIMIT"));
         assert_eq!(params.len(), 1);
@@ -288,7 +290,9 @@ mod tests {
             ..default_args()
         };
         let (sql, params) = build_query(&args, FIXED_NOW).unwrap();
-        assert!(sql.contains("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE value = ?)"));
+        assert!(
+            sql.contains("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE LOWER(value) = LOWER(?))")
+        );
         assert_eq!(params.len(), 1);
     }
 
@@ -300,7 +304,7 @@ mod tests {
         };
         let (sql, params) = build_query(&args, FIXED_NOW).unwrap();
         let count = sql
-            .matches("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE value = ?)")
+            .matches("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE LOWER(value) = LOWER(?))")
             .count();
         assert_eq!(count, 2, "two tag clauses expected for AND semantics");
         assert_eq!(params.len(), 2);
@@ -372,11 +376,13 @@ mod tests {
             workspace: None,
         };
         let (sql, params) = build_query(&args, FIXED_NOW).unwrap();
-        assert!(sql.contains("c.project = ?"));
+        assert!(sql.contains("c.project LIKE ?"));
         assert!(sql.contains("c.exit_code = 0"));
         assert!(sql.contains("c.timestamp >= ?"));
         assert!(sql.contains("c.session_id = ?"));
-        assert!(sql.contains("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE value = ?)"));
+        assert!(
+            sql.contains("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE LOWER(value) = LOWER(?))")
+        );
         assert!(!sql.contains("LIMIT"));
         assert!(!sql.contains("JOIN"));
         assert!(sql.contains("ORDER BY c.timestamp ASC"));

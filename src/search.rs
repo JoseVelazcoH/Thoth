@@ -239,8 +239,8 @@ pub fn build_query(
     }
 
     if let Some(ref p) = args.project {
-        fragments.push("c.project = ?".to_string());
-        params.push(Box::new(p.clone()));
+        fragments.push("c.project LIKE ?".to_string());
+        params.push(Box::new(format!("%{p}%")));
     }
 
     match &args.exit {
@@ -286,7 +286,9 @@ pub fn build_query(
     }
 
     for tag in &args.tag {
-        fragments.push("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE value = ?)".to_string());
+        fragments.push(
+            "EXISTS(SELECT 1 FROM json_each(c.tags) WHERE LOWER(value) = LOWER(?))".to_string(),
+        );
         params.push(Box::new(tag.clone()));
     }
 
@@ -584,7 +586,7 @@ mod tests {
             ..default_args()
         };
         let (sql, params) = build_query(&args, FIXED_NOW).unwrap();
-        assert!(sql.contains("c.project = ?"));
+        assert!(sql.contains("c.project LIKE ?"));
         assert_eq!(params.len(), 2);
     }
 
@@ -683,7 +685,9 @@ mod tests {
             ..default_args()
         };
         let (sql, params) = build_query(&args, FIXED_NOW).unwrap();
-        assert!(sql.contains("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE value = ?)"));
+        assert!(
+            sql.contains("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE LOWER(value) = LOWER(?))")
+        );
         assert_eq!(params.len(), 2);
     }
 
@@ -695,7 +699,7 @@ mod tests {
         };
         let (sql, params) = build_query(&args, FIXED_NOW).unwrap();
         let count = sql
-            .matches("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE value = ?)")
+            .matches("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE LOWER(value) = LOWER(?))")
             .count();
         assert_eq!(count, 2);
         assert_eq!(params.len(), 3);
@@ -775,8 +779,10 @@ mod tests {
         };
         let (sql, params) = build_query(&args, FIXED_NOW).unwrap();
         assert!(sql.contains("INNER JOIN commands_fts"));
-        assert!(sql.contains("c.project = ?"));
-        assert!(sql.contains("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE value = ?)"));
+        assert!(sql.contains("c.project LIKE ?"));
+        assert!(
+            sql.contains("EXISTS(SELECT 1 FROM json_each(c.tags) WHERE LOWER(value) = LOWER(?))")
+        );
         assert_eq!(params.len(), 4);
     }
 
