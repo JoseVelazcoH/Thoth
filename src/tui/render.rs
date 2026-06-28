@@ -15,7 +15,9 @@ use crate::workspaces::WorkspaceRow;
 const EDIT_MODAL_W: u16 = 60;
 const EDIT_MODAL_H: u16 = 5;
 const HELP_MODAL_W: u16 = 62;
-const HELP_MODAL_H: u16 = 8;
+const HELP_MODAL_H: u16 = 10;
+const CMDLINE_MODAL_W: u16 = 60;
+const CMDLINE_MODAL_H: u16 = 3;
 
 pub fn display_command(raw: &str) -> String {
     let collapsed: String = raw
@@ -676,6 +678,9 @@ pub fn draw_with_cmd_state(
     if app.show_help {
         render_help_modal(frame, middle_area, theme);
     }
+    if let Some(ref buf) = app.cmdline {
+        render_cmdline_modal(frame, middle_area, buf, theme);
+    }
 
     let query_text = format!("> {}", app.query);
     frame.render_widget(Paragraph::new(query_text), query_area);
@@ -725,6 +730,9 @@ pub fn draw_with_cmd_state(
                 Span::styled(" · ", dim_style),
                 Span::styled("i", accent_style),
                 Span::styled(" search", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled(":", accent_style),
+                Span::styled(" filter", dim_style),
                 Span::styled(" · ", dim_style),
                 Span::styled("?", accent_style),
                 Span::styled(" help", dim_style),
@@ -873,15 +881,17 @@ fn render_help_modal(frame: &mut Frame, area: Rect, theme: &Theme) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme.accent))
-        .title(Span::styled(
-            " Search filters (type in the box) ",
-            accent_style,
-        ));
+        .title(Span::styled(" Help ", accent_style));
 
     let inner = block.inner(modal_area);
     frame.render_widget(block, modal_area);
 
     let lines = vec![
+        Line::from(vec![
+            Span::styled("  :", accent_style),
+            Span::styled(" open filter cmdline  fields: project:/p:  tag:/t:  exit:ok|fail  since:  until:  dur:>30", dim_style),
+        ]),
+        Line::from(vec![Span::raw("")]),
         Line::from(vec![
             Span::styled("  project:NAME", kw_style),
             Span::styled("  p:NAME", dim_style),
@@ -916,6 +926,28 @@ fn render_help_modal(frame: &mut Frame, area: Rect, theme: &Theme) {
     ];
 
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn render_cmdline_modal(frame: &mut Frame, area: Rect, buf: &str, theme: &Theme) {
+    let accent_style = Style::default()
+        .fg(theme.accent)
+        .add_modifier(Modifier::BOLD);
+    let text_style = Style::default().fg(theme.command);
+
+    let modal_area = centered_rect(CMDLINE_MODAL_W, CMDLINE_MODAL_H, area);
+    frame.render_widget(Clear, modal_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.accent))
+        .title(Span::styled(" Cmdline ", accent_style));
+
+    let inner = block.inner(modal_area);
+    frame.render_widget(block, modal_area);
+
+    let display = format!("> {buf}_");
+    frame.render_widget(Paragraph::new(Span::styled(display, text_style)), inner);
 }
 
 fn render_edit_modal(
@@ -2857,6 +2889,88 @@ mod tests {
         assert!(
             text.contains("help"),
             "Normal mode controls must show 'help' hint; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn controls_normal_shows_filter_hint() {
+        let mut app = app_with_rows();
+        app.mode = crate::tui::app::Mode::Normal;
+        let text = render_app(&app);
+        assert!(
+            text.contains("filter"),
+            "Normal mode controls must show 'filter' hint; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn cmdline_popup_renders_with_title_and_buffer() {
+        let mut app = app_with_rows();
+        app.cmdline = Some("project:thoth exit:fail".to_string());
+        let text = render_app(&app);
+        assert!(
+            text.contains("Cmdline"),
+            "cmdline popup must show 'Cmdline' title; got:\n{text}"
+        );
+        assert!(
+            text.contains("project:thoth"),
+            "cmdline popup must show buffer text; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn cmdline_popup_not_shown_when_closed() {
+        let app = app_with_rows();
+        let text = render_app(&app);
+        assert!(
+            !text.contains("Cmdline"),
+            "cmdline popup must not appear when cmdline is None; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn help_overlay_mentions_colon_cmdline() {
+        let mut app = app_with_rows();
+        app.show_help = true;
+        let text = render_app(&app);
+        assert!(
+            text.contains("filter cmdline") || text.contains("cmdline"),
+            "help overlay must mention ':' cmdline; got:\n{text}"
+        );
+    }
+
+    fn render_cmdline_popup_120x18(buf_text: &str) -> String {
+        let mut app = app_with_rows();
+        app.cmdline = Some(buf_text.to_string());
+        let cols = default_cols();
+        let backend = TestBackend::new(120, 18);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ts = TableState::default();
+        terminal
+            .draw(|f| draw(f, &app, TEST_NOW, true, &cols, &mut ts))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut lines: Vec<String> = Vec::new();
+        for row in 0..18u16 {
+            let mut line = String::new();
+            for col in 0..120u16 {
+                line.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+            }
+            lines.push(line);
+        }
+        lines.join("\n")
+    }
+
+    #[test]
+    fn cmdline_popup_120x18_dump_contains_buffer_and_title() {
+        let text = render_cmdline_popup_120x18("project:thoth exit:fail");
+        assert!(
+            text.contains("Cmdline"),
+            "120x18 dump must contain 'Cmdline' title; got:\n{text}"
+        );
+        assert!(
+            text.contains("project:thoth"),
+            "120x18 dump must show typed buffer; got:\n{text}"
         );
     }
 }
