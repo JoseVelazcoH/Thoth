@@ -14,8 +14,8 @@ use crate::workspaces::WorkspaceRow;
 
 const EDIT_MODAL_W: u16 = 60;
 const EDIT_MODAL_H: u16 = 5;
-const HELP_MODAL_W: u16 = 62;
-const HELP_MODAL_H: u16 = 10;
+const HELP_MODAL_W: u16 = 64;
+const HELP_MODAL_H: u16 = 17;
 const CMDLINE_MODAL_W: u16 = 60;
 const CMDLINE_MODAL_H: u16 = 3;
 
@@ -886,42 +886,60 @@ fn render_help_modal(frame: &mut Frame, area: Rect, theme: &Theme) {
     let inner = block.inner(modal_area);
     frame.render_widget(block, modal_area);
 
+    let field = |kw: &str, alias: &str, desc: &str| {
+        let left = format!("  {kw}{alias}");
+        let pad = " ".repeat(28usize.saturating_sub(left.chars().count()));
+        Line::from(vec![
+            Span::styled(format!("  {kw}"), kw_style),
+            Span::styled(format!("{alias}{pad}"), dim_style),
+            Span::styled(desc.to_string(), dim_style),
+        ])
+    };
+    let key = |k: &str, label: &str| {
+        vec![
+            Span::styled(format!("  {k}"), accent_style),
+            Span::styled(format!(" {label}"), dim_style),
+        ]
+    };
+
     let lines = vec![
         Line::from(vec![
-            Span::styled("  :", accent_style),
-            Span::styled(" open filter cmdline  fields: project:/p:  tag:/t:  exit:ok|fail  since:  until:  dur:>30", dim_style),
+            Span::styled("  Filters", accent_style),
+            Span::styled("  (press ", dim_style),
+            Span::styled(":", kw_style),
+            Span::styled(" to open the cmdline, then type)", dim_style),
         ]),
         Line::from(vec![Span::raw("")]),
-        Line::from(vec![
-            Span::styled("  project:NAME", kw_style),
-            Span::styled("  p:NAME", dim_style),
-            Span::styled("      tag:NAME", kw_style),
-            Span::styled("  t:NAME", dim_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  exit:ok|fail", kw_style),
-            Span::styled("           since:DATE", dim_style),
-            Span::styled("  until:DATE", dim_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  dur:>30", kw_style),
-            Span::styled("  (seconds, use > or <)", dim_style),
-        ]),
+        field("project:NAME", "  p:", "filter by project"),
+        field("tag:NAME", "  t:", "filter by tag (repeatable)"),
+        field("exit:ok|fail", "", "filter by exit status"),
+        field(
+            "since:DATE",
+            "  until:DATE",
+            "time range (2h, today, 2024-01-01)",
+        ),
+        field("dur:>30", "  dur:<5", "duration in seconds"),
         Line::from(vec![Span::raw("")]),
-        Line::from(vec![
-            Span::styled("  esc", accent_style),
-            Span::styled(" normal", dim_style),
-            Span::styled("  i", accent_style),
-            Span::styled(" search", dim_style),
-            Span::styled("  j/k", accent_style),
-            Span::styled(" move", dim_style),
-            Span::styled("  d", accent_style),
-            Span::styled(" delete", dim_style),
-            Span::styled("  e", accent_style),
-            Span::styled(" edit", dim_style),
-            Span::styled("  ?", accent_style),
-            Span::styled(" help", dim_style),
-        ]),
+        Line::from(vec![Span::styled("  Keys", accent_style)]),
+        Line::from(
+            [
+                key("esc", "normal"),
+                key("i", "search"),
+                key(":", "filter"),
+                key("enter", "run"),
+            ]
+            .concat(),
+        ),
+        Line::from(
+            [
+                key("j/k", "move"),
+                key("d", "delete"),
+                key("e", "edit"),
+                key("?", "help"),
+            ]
+            .concat(),
+        ),
+        Line::from(vec![Span::raw("")]),
         Line::from(vec![Span::styled("  Press any key to close", dim_style)]),
     ];
 
