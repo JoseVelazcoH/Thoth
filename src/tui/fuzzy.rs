@@ -18,11 +18,17 @@ pub fn rank(query: &str, items: &[CommandRow]) -> Vec<usize> {
         .enumerate()
         .filter_map(|(i, row)| {
             let tag_text = crate::tags::parse_active(&row.tags).join(" ");
-            let hay = if tag_text.is_empty() {
-                row.command.clone()
-            } else {
-                format!("{} {tag_text}", row.command)
-            };
+            let mut parts = vec![row.command.as_str()];
+            if !tag_text.is_empty() {
+                parts.push(tag_text.as_str());
+            }
+            if !row.project.is_empty() {
+                parts.push(row.project.as_str());
+            }
+            if !row.directory.is_empty() {
+                parts.push(row.directory.as_str());
+            }
+            let hay = parts.join(" ");
             let mut haystack_buf = Vec::new();
             let haystack = Utf32Str::new(&hay, &mut haystack_buf);
             pattern.score(haystack, &mut matcher).map(|s| (i, s))
@@ -55,6 +61,18 @@ mod tests {
     fn row_with_tags(command: &str, tags: &str) -> CommandRow {
         let mut r = row(command);
         r.tags = tags.to_string();
+        r
+    }
+
+    fn row_with_project(command: &str, project: &str) -> CommandRow {
+        let mut r = row(command);
+        r.project = project.to_string();
+        r
+    }
+
+    fn row_with_directory(command: &str, directory: &str) -> CommandRow {
+        let mut r = row(command);
+        r.directory = directory.to_string();
         r
     }
 
@@ -103,6 +121,51 @@ mod tests {
         let items = vec![row("git status"), row("ls -la"), row("cargo build")];
         let result = rank("zzzzzzzzzzz", &items);
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn query_matches_project_not_in_command_or_tags() {
+        let items = vec![
+            row_with_project("ls -la", "myproject"),
+            row("git status"),
+        ];
+        let result = rank("myproject", &items);
+        assert!(
+            result.contains(&0),
+            "row with matching project must appear in results"
+        );
+        assert!(
+            !result.contains(&1),
+            "row with non-matching project must not appear"
+        );
+    }
+
+    #[test]
+    fn query_matches_directory_not_in_command_or_tags() {
+        let items = vec![
+            row_with_directory("ls", "/home/jose/special-dir"),
+            row("git status"),
+        ];
+        let result = rank("special-dir", &items);
+        assert!(
+            result.contains(&0),
+            "row with matching directory must appear in results"
+        );
+        assert!(
+            !result.contains(&1),
+            "row with non-matching directory must not appear"
+        );
+    }
+
+    #[test]
+    fn command_tag_match_still_works_after_haystack_extension() {
+        let items = vec![
+            row_with_tags("cargo build", r#"["release"]"#),
+            row("unrelated"),
+        ];
+        let result = rank("release", &items);
+        assert!(result.contains(&0), "tag match must still work");
+        assert!(!result.contains(&1), "non-matching row must not appear");
     }
 
     #[test]
