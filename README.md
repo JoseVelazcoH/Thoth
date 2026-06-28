@@ -1,92 +1,105 @@
 <p align="center">
-  <picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/header/surface.svg?title=Thoth&amp;subtitle=Your+shell+forgets.+Thoth+doesn%27t.&amp;logo=ri%3ABsTerminal&amp;logoColor=000000&amp;mode=dark&amp;theme=orange&amp;font=geist-mono&amp;border=false" /><img alt="header" src="https://shieldcn.dev/header/surface.svg?title=Thoth&amp;subtitle=Your+shell+forgets.+Thoth+doesn%27t.&amp;logo=ri%3ABsTerminal&amp;logoColor=000000&amp;mode=light&amp;theme=orange&amp;font=geist-mono&amp;border=false" /></picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/thoth_dark.svg">
+    <img src="assets/thoth_light.svg" alt="Thoth">
+  </picture>
 </p>
 
-## What is Thoth?
-Thoth is an intelligent shell history. Instead of a flat list of commands, it records each command together with the context it ran in: the working directory, the inferred project, how long it took, its exit code, and the tags of the active work session.
+<p align="center">
+  An intelligent shell history that captures every command with its context and makes it searchable.
+</p>
 
-Commands are automatically grouped into work sessions and can be searched by project, tag, date, result, and free text.
+<p align="center">
+  <a href="https://github.com/JoseVelazcoH/Thoth/releases"><img src="https://img.shields.io/github/v/release/JoseVelazcoH/Thoth?style=flat-square" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
+  <img src="https://img.shields.io/badge/built%20with-Rust-orange?style=flat-square" alt="Rust">
+</p>
 
-The name comes from Thoth, the Egyptian god of writing and memory. The binary is tth.
+> [Thoth](https://en.wikipedia.org/wiki/Thoth), the moon god of ancient Egypt and god of
+> wisdom, was the scribe and counselor of the sun god Ra. Just as Thoth recorded the memory
+> of the universe, this tool inherits his name to become the keeper of your workflow, making
+> sure no valuable command is lost to the oblivion of the shell.
 
+Inspired by [Atuin](https://github.com/atuinsh/atuin) (highly recommended). Thoth shares the
+goal of a smarter shell history and focuses on turning it into something you can act on:
+record-and-replay **workspaces**, a themeable vim-style TUI, and a finder-style search.
 
-## Status
+<p align="center">
+  <img src="assets/demo.gif" width="700" />
+</p>
 
-Early development. The capture engine is written in Rust and ships as a single static binary (SQLite with full-text search is bundled in). Shell hooks for automatic capture (bash and zsh) and the query commands are in progress.
+## Features
 
-A Python prototype that validated the original design lives under `prototype/python/`.
+- **Context capture** - every command is saved with its directory, project, exit code,
+  duration, and active tags.
+- **Finder-style search** - an interactive TUI (press `Ctrl-R`) with live multi-field fuzzy
+  matching, a preview pane, and a `:` cmdline for precise filters
+  (`project:`, `tag:`, `exit:ok|fail`, `since:`, `until:`, `dur:>30`).
+- **Workspaces** - record a window of commands (`tth-sw <name>` / `tth-ew`) and replay the
+  whole sequence in order, in your shell.
+- **Vim-style modal TUI** - `Esc` for normal mode, `j/k` to move, `d` to delete, `e` to
+  edit, `?` for help.
+- **Themeable** - 7 built-in themes (including the Catppuccin flavors) plus your own, with
+  quick switching via `tth theme <name>`.
+- **Sessions, stats, export, and tags** for organizing and reusing your history.
+- **Private by default** - Thoth's own commands and anything matching your history filter
+  are never recorded, and everything lives in a local SQLite database.
 
-## Prompt setup
+See [docs/features.md](docs/features.md) for a deeper guide to every feature.
 
-<a name="prompt-setup"></a>
+## Install
 
-After running `tth install`, the shell hook exports `TTH_PROMPT_TAGS` (e.g. `[work][api]`) and `TTH_ACTIVE_TAGS` (JSON) on every command. To show active tags in your prompt, pick the section for your framework below.
+### Prebuilt binary (recommended)
 
-### Starship
-
-Add to `~/.config/starship.toml`:
-
-```toml
-[env_var.thoth_tags]
-variable = "TTH_PROMPT_TAGS"
-format = "[$env_value]($style) "
-style = "bold yellow"
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/JoseVelazcoH/Thoth/releases/latest/download/thoth-installer.sh | sh
 ```
 
-**Important:** Starship does not render modules that are not referenced in the top-level `format` string. Add `${env_var.thoth_tags}` to your `format` where you want tags to appear:
+### With Cargo
 
-```toml
-format = "$git_status ${env_var.thoth_tags}$character"
+```sh
+cargo install --path .   # from a clone; requires a Rust toolchain
 ```
 
-### Powerlevel10k
+### From source
 
-Add to your `~/.zshrc` after p10k is loaded:
-
-```zsh
-# 1. Define a custom segment function:
-prompt_tth_tags() {
-  p10k segment -t "$TTH_PROMPT_TAGS"
-}
-
-# 2. Add tth_tags to your prompt elements, e.g.:
-# POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(... tth_tags)
-# or POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(... tth_tags)
+```sh
+git clone https://github.com/JoseVelazcoH/Thoth.git
+cd Thoth
+cargo install --path .
 ```
 
-See [p10k custom segments](https://github.com/romkatv/powerlevel10k#batteries-included) for details.
+### Enable the shell integration
 
-### oh-my-posh
-
-Add a `text` segment to your theme JSON or YAML that reads the env var:
-
-```json
-{
-  "type": "text",
-  "template": "{{ .Env.TTH_PROMPT_TAGS }}"
-}
+```sh
+tth install     # adds the eval line to your shell rc (bash or zsh)
+exec $SHELL     # reload your shell, or open a new terminal
 ```
 
-YAML equivalent:
+## Quick start
 
-```yaml
-- type: text
-  template: "{{ .Env.TTH_PROMPT_TAGS }}"
+- Press **`Ctrl-R`** to open the interactive search.
+- **Type** to fuzzy-filter across the command, project, directory, and tags.
+- Press **`Esc`** for normal mode, then **`:`** to open the filter cmdline
+  (e.g. `project:thoth exit:fail`), or **`?`** for help.
+- **`Enter`** runs the selected command, **`Tab`** puts it on your prompt to edit.
+
+Record a workspace and replay it later:
+
+```sh
+tth-sw deploy        # start recording into the "deploy" workspace
+# ... run your commands ...
+tth-ew               # stop
 ```
 
-See [oh-my-posh text segment docs](https://ohmyposh.dev/docs/segments/system/text).
+Then open the TUI, switch to the **Workspaces** tab (`→`), and press `Enter` to replay it.
 
-### Plain PS1 / PROMPT
+## Contributing
 
-```zsh
-# zsh
-PROMPT="${TTH_PROMPT_TAGS} $PROMPT"
-```
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) to get started, and please
+follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-```bash
-# bash
-PS1="${TTH_PROMPT_TAGS} $PS1"
-```
+## License
 
-You can also run `tth prompt --framework <starship|powerlevel10k|oh-my-posh|generic>` to print the snippet for your framework, or just `tth prompt` to auto-detect.
-
+Released under the [MIT License](LICENSE).

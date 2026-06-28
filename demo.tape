@@ -5,7 +5,7 @@
 # Everything runs against a throwaway demo database (see scripts/seed-demo.sh),
 # so your real history never appears.
 
-Output demo.gif
+Output assets/demo.gif
 
 Require tth
 
