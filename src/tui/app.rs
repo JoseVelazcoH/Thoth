@@ -3,6 +3,7 @@ use rusqlite::Connection;
 use crate::cli::SearchArgs;
 use crate::error::ThothError;
 use crate::search::{CommandRow, ExitFilter};
+use crate::theme::Theme;
 use crate::tui::fuzzy;
 use crate::workspaces::WorkspaceRow;
 
@@ -128,6 +129,7 @@ pub struct App {
     pub pending_delete: Option<(i64, DeleteOrigin)>,
     pub edit: Option<EditState>,
     pub pending_edit: Option<(i64, String)>,
+    pub theme: Theme,
 }
 
 impl Default for App {
@@ -160,6 +162,7 @@ impl App {
             pending_delete: None,
             edit: None,
             pending_edit: None,
+            theme: Theme::default(),
         }
     }
 

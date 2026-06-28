@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ThothError;
+use crate::theme::{self, Theme};
 
 const VALID_KEYS: &[(&str, &str)] = &[
     ("session.gap_minutes", "positive integer"),
@@ -36,6 +37,11 @@ default_limit = 50
 # Thoth's own commands (tth, tth-sw, tth-tag, etc.) are ignored by default via this filter.
 # To add more patterns (e.g. secrets), extend the list:
 # filter = ["^\\s*tth\\b", "--password", "export .*TOKEN"]
+
+# [theme]
+# Built-in themes: default, ember, frost, latte, frappe, macchiato, mocha
+# You can also drop a <name>.toml file in ~/.config/thoth/themes/ for a custom theme.
+# name = "default"
 "#;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
@@ -142,6 +148,25 @@ impl Default for History {
     }
 }
 
+fn default_theme_name() -> String {
+    "default".into()
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[serde(default)]
+pub struct ThemeSection {
+    #[serde(default = "default_theme_name")]
+    pub name: String,
+}
+
+impl Default for ThemeSection {
+    fn default() -> Self {
+        Self {
+            name: default_theme_name(),
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, Default, PartialEq)]
 #[serde(default)]
 pub struct Config {
@@ -149,6 +174,7 @@ pub struct Config {
     pub tui: Tui,
     pub search: Search,
     pub history: History,
+    pub theme: ThemeSection,
 }
 
 fn config_path_from(thoth_config: Option<&str>, xdg_config: Option<&str>, home: &Path) -> PathBuf {
@@ -202,6 +228,111 @@ pub fn load() -> Config {
             Config::default()
         }
     }
+}
+
+pub fn themes_dir_from(
+    thoth_config: Option<&str>,
+    xdg_config: Option<&str>,
+    home: &Path,
+) -> PathBuf {
+    let config_file = config_path_from(thoth_config, xdg_config, home);
+    config_file.parent().unwrap_or(home).join("themes")
+}
+
+pub fn resolve_themes_dir() -> PathBuf {
+    let thoth_config = std::env::var("THOTH_CONFIG").ok();
+    let xdg_config = std::env::var("XDG_CONFIG_HOME").ok();
+    let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
+    themes_dir_from(
+        thoth_config.as_deref(),
+        xdg_config.as_deref(),
+        Path::new(&home),
+    )
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct ThemeFile {
+    extends: Option<String>,
+    selection_bg: Option<String>,
+    selection_fg: Option<String>,
+    accent: Option<String>,
+    dim: Option<String>,
+    border: Option<String>,
+    ok: Option<String>,
+    fail: Option<String>,
+    project: Option<String>,
+    command: Option<String>,
+    header: Option<String>,
+    controls: Option<String>,
+    directory: Option<String>,
+    tags: Option<String>,
+}
+
+pub fn apply_theme_file(base: Theme, toml_text: &str) -> Theme {
+    let file: ThemeFile = toml::from_str(toml_text).unwrap_or_default();
+    let mut t = base;
+
+    macro_rules! patch {
+        ($field:ident) => {
+            if let Some(ref s) = file.$field {
+                match theme::parse_color(s) {
+                    Ok(c) => t.$field = c,
+                    Err(_) => eprintln!(
+                        "thoth: invalid theme color for '{}': {}",
+                        stringify!($field),
+                        s
+                    ),
+                }
+            }
+        };
+    }
+
+    patch!(selection_bg);
+    patch!(selection_fg);
+    patch!(accent);
+    patch!(dim);
+    patch!(border);
+    patch!(ok);
+    patch!(fail);
+    patch!(project);
+    patch!(command);
+    patch!(header);
+    patch!(controls);
+    patch!(directory);
+    patch!(tags);
+
+    t
+}
+
+pub fn resolve_theme(name: &str, themes_dir: &Path) -> Theme {
+    if let Some(t) = theme::builtin(name) {
+        return t;
+    }
+
+    let file_path = themes_dir.join(format!("{name}.toml"));
+    if file_path.exists() {
+        match std::fs::read_to_string(&file_path) {
+            Ok(text) => {
+                let extends_name: String = {
+                    let tf: ThemeFile = toml::from_str(&text).unwrap_or_default();
+                    tf.extends.unwrap_or_else(|| "default".into())
+                };
+                let base = theme::builtin(&extends_name).unwrap_or_default();
+                return apply_theme_file(base, &text);
+            }
+            Err(e) => {
+                eprintln!(
+                    "thoth: cannot read theme file {}: {}",
+                    file_path.display(),
+                    e
+                );
+            }
+        }
+    } else {
+        eprintln!("thoth: unknown theme '{}', using default", name);
+    }
+
+    Theme::default()
 }
 
 pub fn config_toml(cfg: &Config) -> Result<String, ThothError> {
@@ -374,6 +505,8 @@ pub fn render_config(cfg: &Config, path: &Path, exists: bool, color: bool) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::Theme;
+    use ratatui::style::Color;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -604,6 +737,103 @@ mod tests {
         assert!(path.exists());
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, DEFAULT_CONFIG_TOML);
+    }
+
+    #[test]
+    fn theme_section_default_name_is_default() {
+        assert_eq!(ThemeSection::default().name, "default");
+    }
+
+    #[test]
+    fn parse_empty_string_theme_name_is_default() {
+        let cfg = parse("").unwrap();
+        assert_eq!(cfg.theme.name, "default");
+    }
+
+    #[test]
+    fn parse_theme_name_mocha() {
+        let cfg = parse("[theme]\nname = \"mocha\"").unwrap();
+        assert_eq!(cfg.theme.name, "mocha");
+    }
+
+    #[test]
+    fn parse_default_config_toml_equals_default_with_theme() {
+        let cfg = parse(DEFAULT_CONFIG_TOML).unwrap();
+        assert_eq!(cfg.theme.name, "default");
+        assert_eq!(cfg, Config::default());
+    }
+
+    #[test]
+    fn apply_theme_file_patches_two_slots() {
+        let base = Theme::default();
+        let toml = "selection_bg = \"#ff8800\"\naccent = \"blue\"\n";
+        let result = apply_theme_file(base, toml);
+        assert_eq!(result.selection_bg, Color::Rgb(255, 136, 0));
+        assert_eq!(result.accent, Color::Blue);
+        assert_eq!(result.ok, Theme::default().ok);
+        assert_eq!(result.dim, Theme::default().dim);
+    }
+
+    #[test]
+    fn apply_theme_file_invalid_color_keeps_base() {
+        let base = Theme::default();
+        let toml = "ok = \"nope\"\n";
+        let result = apply_theme_file(base, toml);
+        assert_eq!(result.ok, Theme::default().ok);
+    }
+
+    #[test]
+    fn apply_theme_file_empty_toml_returns_base_unchanged() {
+        let base = Theme::default();
+        let result = apply_theme_file(base, "");
+        assert_eq!(result, Theme::default());
+    }
+
+    #[test]
+    fn resolve_theme_builtin_mocha() {
+        let dir = TempDir::new().unwrap();
+        let t = resolve_theme("mocha", dir.path());
+        assert_eq!(t, crate::theme::builtin("mocha").unwrap());
+    }
+
+    #[test]
+    fn resolve_theme_unknown_returns_default() {
+        let dir = TempDir::new().unwrap();
+        let t = resolve_theme("does-not-exist", dir.path());
+        assert_eq!(t, Theme::default());
+    }
+
+    #[test]
+    fn resolve_theme_file_with_extends_and_override() {
+        let dir = TempDir::new().unwrap();
+        let content = "extends = \"mocha\"\naccent = \"red\"\n";
+        std::fs::write(dir.path().join("mine.toml"), content).unwrap();
+        let t = resolve_theme("mine", dir.path());
+        let mocha = crate::theme::builtin("mocha").unwrap();
+        assert_eq!(t.accent, Color::Red);
+        assert_eq!(t.ok, mocha.ok);
+        assert_eq!(t.selection_bg, mocha.selection_bg);
+    }
+
+    #[test]
+    fn themes_dir_from_uses_config_parent() {
+        let home = Path::new("/home/user");
+        let dir = themes_dir_from(None, None, home);
+        assert_eq!(dir, PathBuf::from("/home/user/.config/thoth/themes"));
+    }
+
+    #[test]
+    fn themes_dir_from_xdg_config() {
+        let home = Path::new("/home/user");
+        let dir = themes_dir_from(None, Some("/xdg/cfg"), home);
+        assert_eq!(dir, PathBuf::from("/xdg/cfg/thoth/themes"));
+    }
+
+    #[test]
+    fn themes_dir_from_thoth_config_override() {
+        let home = Path::new("/home/user");
+        let dir = themes_dir_from(Some("/custom/thoth/config.toml"), None, home);
+        assert_eq!(dir, PathBuf::from("/custom/thoth/themes"));
     }
 
     #[test]
