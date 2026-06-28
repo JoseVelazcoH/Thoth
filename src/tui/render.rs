@@ -14,6 +14,8 @@ use crate::workspaces::WorkspaceRow;
 
 const EDIT_MODAL_W: u16 = 60;
 const EDIT_MODAL_H: u16 = 5;
+const HELP_MODAL_W: u16 = 62;
+const HELP_MODAL_H: u16 = 8;
 
 pub fn display_command(raw: &str) -> String {
     let collapsed: String = raw
@@ -103,6 +105,9 @@ fn filter_chips(app: &App) -> String {
     }
     if let Some(ref s) = app.filters.session {
         parts.push(format!("[session:{}]", short_id(s)));
+    }
+    if let Some(ref d) = app.filters.duration {
+        parts.push(format!("[dur:{d}]"));
     }
     parts.join(" ")
 }
@@ -668,6 +673,9 @@ pub fn draw_with_cmd_state(
     if let Some(ref es) = app.edit {
         render_edit_modal(frame, middle_area, es, theme);
     }
+    if app.show_help {
+        render_help_modal(frame, middle_area, theme);
+    }
 
     let query_text = format!("> {}", app.query);
     frame.render_widget(Paragraph::new(query_text), query_area);
@@ -717,6 +725,9 @@ pub fn draw_with_cmd_state(
                 Span::styled(" · ", dim_style),
                 Span::styled("i", accent_style),
                 Span::styled(" search", dim_style),
+                Span::styled(" · ", dim_style),
+                Span::styled("?", accent_style),
+                Span::styled(" help", dim_style),
                 Span::styled(" · ", dim_style),
                 Span::styled("q", accent_style),
                 Span::styled(" quit", dim_style),
@@ -846,6 +857,65 @@ fn render_confirm_modal(frame: &mut Frame, area: Rect, app: &crate::tui::app::Ap
             frame.render_widget(hint, inner);
         }
     }
+}
+
+fn render_help_modal(frame: &mut Frame, area: Rect, theme: &Theme) {
+    let dim_style = Style::default().fg(theme.dim);
+    let accent_style = Style::default()
+        .fg(theme.accent)
+        .add_modifier(Modifier::BOLD);
+    let kw_style = Style::default().fg(theme.command);
+
+    let modal_area = centered_rect(HELP_MODAL_W, HELP_MODAL_H, area);
+    frame.render_widget(Clear, modal_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.accent))
+        .title(Span::styled(
+            " Search filters (type in the box) ",
+            accent_style,
+        ));
+
+    let inner = block.inner(modal_area);
+    frame.render_widget(block, modal_area);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  project:NAME", kw_style),
+            Span::styled("  p:NAME", dim_style),
+            Span::styled("      tag:NAME", kw_style),
+            Span::styled("  t:NAME", dim_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  exit:ok|fail", kw_style),
+            Span::styled("           since:DATE", dim_style),
+            Span::styled("  until:DATE", dim_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  dur:>30", kw_style),
+            Span::styled("  (seconds, use > or <)", dim_style),
+        ]),
+        Line::from(vec![Span::raw("")]),
+        Line::from(vec![
+            Span::styled("  esc", accent_style),
+            Span::styled(" normal", dim_style),
+            Span::styled("  i", accent_style),
+            Span::styled(" search", dim_style),
+            Span::styled("  j/k", accent_style),
+            Span::styled(" move", dim_style),
+            Span::styled("  d", accent_style),
+            Span::styled(" delete", dim_style),
+            Span::styled("  e", accent_style),
+            Span::styled(" edit", dim_style),
+            Span::styled("  ?", accent_style),
+            Span::styled(" help", dim_style),
+        ]),
+        Line::from(vec![Span::styled("  Press any key to close", dim_style)]),
+    ];
+
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn render_edit_modal(
@@ -1481,7 +1551,7 @@ mod tests {
             state: KeyEventState::NONE,
         };
         for _ in 0..3 {
-            handle_key(up_key, &mut app);
+            handle_key(up_key, &mut app, TEST_NOW);
         }
 
         let (after_up3, _) = render_app_small(&app, 80, 12);
@@ -1616,6 +1686,7 @@ mod tests {
                 state: KeyEventState::NONE,
             },
             &mut app,
+            TEST_NOW,
         );
         assert_eq!(
             app.selected_command(),
@@ -1638,6 +1709,7 @@ mod tests {
                 state: KeyEventState::NONE,
             },
             &mut app,
+            TEST_NOW,
         );
         assert_eq!(app.selected_command(), Some("middle-cmd"));
 
@@ -1649,6 +1721,7 @@ mod tests {
                 state: KeyEventState::NONE,
             },
             &mut app,
+            TEST_NOW,
         );
         assert_eq!(
             app.selected_command(),
@@ -1670,7 +1743,7 @@ mod tests {
             state: KeyEventState::NONE,
         };
         for _ in 0..10 {
-            handle_key(up_key, &mut app);
+            handle_key(up_key, &mut app, TEST_NOW);
         }
         assert_eq!(
             app.selected_command(),
@@ -1692,7 +1765,7 @@ mod tests {
             state: KeyEventState::NONE,
         };
         for _ in 0..10 {
-            handle_key(down_key, &mut app);
+            handle_key(down_key, &mut app, TEST_NOW);
         }
         assert_eq!(
             app.selected_command(),
@@ -1721,7 +1794,7 @@ mod tests {
             state: KeyEventState::NONE,
         };
         for _ in 0..15 {
-            handle_key(up_key, &mut app);
+            handle_key(up_key, &mut app, TEST_NOW);
         }
 
         let (_, buf) = render_app_small(&app, W, H);
@@ -1764,20 +1837,20 @@ mod tests {
         let (s0, _) = render_app_small_with_state(&app, W, H, &mut ts);
         println!("=== FRAME 0 (default, newest=nav-00 at bottom, highlighted) ===\n{s0}");
 
-        handle_key(up_key, &mut app);
+        handle_key(up_key, &mut app, TEST_NOW);
         let (s1, _) = render_app_small_with_state(&app, W, H, &mut ts);
         println!("\n=== FRAME 1 (Up x1 - cursor moves UP within viewport, no scroll) ===\n{s1}");
 
-        handle_key(up_key, &mut app);
+        handle_key(up_key, &mut app, TEST_NOW);
         let (s2, _) = render_app_small_with_state(&app, W, H, &mut ts);
         println!("\n=== FRAME 2 (Up x2 - cursor moves UP within viewport, no scroll) ===\n{s2}");
 
-        handle_key(up_key, &mut app);
-        handle_key(up_key, &mut app);
-        handle_key(up_key, &mut app);
-        handle_key(up_key, &mut app);
-        handle_key(up_key, &mut app);
-        handle_key(up_key, &mut app);
+        handle_key(up_key, &mut app, TEST_NOW);
+        handle_key(up_key, &mut app, TEST_NOW);
+        handle_key(up_key, &mut app, TEST_NOW);
+        handle_key(up_key, &mut app, TEST_NOW);
+        handle_key(up_key, &mut app, TEST_NOW);
+        handle_key(up_key, &mut app, TEST_NOW);
         let (s8, _) = render_app_small_with_state(&app, W, H, &mut ts);
         println!("\n=== FRAME 8 (Up x8 - content has scrolled, older commands visible) ===\n{s8}");
     }
@@ -1849,12 +1922,12 @@ mod tests {
         let visible0 = visible_commands(&buf0, W, H);
         let highlighted0 = highlighted_command(&buf0, W, H);
 
-        handle_key(up_key, &mut app);
+        handle_key(up_key, &mut app, TEST_NOW);
         let (_, buf1) = render_app_small_with_state(&app, W, H, &mut ts);
         let visible1 = visible_commands(&buf1, W, H);
         let highlighted1 = highlighted_command(&buf1, W, H);
 
-        handle_key(up_key, &mut app);
+        handle_key(up_key, &mut app, TEST_NOW);
         let (_, buf2) = render_app_small_with_state(&app, W, H, &mut ts);
         let visible2 = visible_commands(&buf2, W, H);
         let highlighted2 = highlighted_command(&buf2, W, H);
@@ -1918,7 +1991,7 @@ mod tests {
         let visible_start = visible_commands(&buf_start, W, H);
 
         for _ in 0..8 {
-            handle_key(up_key, &mut app);
+            handle_key(up_key, &mut app, TEST_NOW);
             render_app_small_with_state(&app, W, H, &mut ts);
         }
 
@@ -2617,6 +2690,7 @@ mod tests {
                 state: KeyEventState::NONE,
             },
             &mut app,
+            TEST_NOW,
         );
 
         let (text_after, _) = render_app_wide(&app);
@@ -2719,6 +2793,70 @@ mod tests {
         assert!(
             text.contains("cargo test --release"),
             "selected command must appear"
+        );
+    }
+
+    #[test]
+    fn filter_chips_shows_dur_chip_when_duration_set() {
+        let mut app = app_with_rows();
+        app.filters.duration = Some(">30".into());
+        let text = render_app(&app);
+        assert!(
+            text.contains("[dur:>30]"),
+            "status bar must show dur chip; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn filter_chips_shows_project_and_exit_fail_when_both_set() {
+        let mut app = app_with_rows();
+        app.filters.project = Some("myproj".into());
+        app.filters.exit = Some(crate::search::ExitFilter::Fail);
+        let text = render_app(&app);
+        assert!(
+            text.contains("[project:myproj]"),
+            "must show project chip; got:\n{text}"
+        );
+        assert!(
+            text.contains("[exit:Fail]"),
+            "must show exit chip; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn help_overlay_renders_when_show_help_true() {
+        let mut app = app_with_rows();
+        app.show_help = true;
+        let text = render_app(&app);
+        assert!(
+            text.contains("project:NAME") || text.contains("project"),
+            "help overlay must show filter fields; got:\n{text}"
+        );
+        assert!(
+            text.contains("exit:ok|fail") || text.contains("exit"),
+            "help overlay must mention exit filter; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn help_overlay_not_shown_when_show_help_false() {
+        let mut app = app_with_rows();
+        app.show_help = false;
+        let text = render_app(&app);
+        assert!(
+            !text.contains("Press any key to close"),
+            "help close hint must not appear when show_help is false; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn controls_normal_shows_help_hint() {
+        let mut app = app_with_rows();
+        app.mode = crate::tui::app::Mode::Normal;
+        let text = render_app(&app);
+        assert!(
+            text.contains("help"),
+            "Normal mode controls must show 'help' hint; got:\n{text}"
         );
     }
 }

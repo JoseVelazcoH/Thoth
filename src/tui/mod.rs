@@ -94,7 +94,7 @@ pub fn run(
             if let Event::Key(key) =
                 ct_event::read().map_err(|e| ThothError::Tui(format!("event read failed: {e}")))?
             {
-                match handle_key(key, &mut app) {
+                match handle_key(key, &mut app, now) {
                     Outcome::Exit => break,
                     Outcome::Continue => {
                         if let Some((id, new_cmd)) = app.pending_edit.take() {

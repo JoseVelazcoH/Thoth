@@ -10,6 +10,67 @@ use crate::workspaces::WorkspaceRow;
 const TUI_LIMIT: usize = 5000;
 const LABEL_MAX: usize = 40;
 
+pub fn parse_query(input: &str, now: i64) -> (FilterState, String) {
+    let mut filters = FilterState::new();
+    let mut free_words: Vec<&str> = Vec::new();
+
+    for token in input.split_whitespace() {
+        if let Some((key, value)) = token.split_once(':') {
+            if value.is_empty() {
+                free_words.push(token);
+                continue;
+            }
+            match key {
+                "project" | "p" => {
+                    filters.project = Some(value.to_string());
+                }
+                "tag" | "t" => {
+                    let v = value.to_string();
+                    if !filters.tag.contains(&v) {
+                        filters.tag.push(v);
+                    }
+                }
+                "exit" | "e" => {
+                    let parsed = match value.to_lowercase().as_str() {
+                        "ok" => Some(ExitFilter::Ok),
+                        "fail" => Some(ExitFilter::Fail),
+                        "any" => Some(ExitFilter::Any),
+                        _ => None,
+                    };
+                    match parsed {
+                        Some(ef) => filters.exit = Some(ef),
+                        None => free_words.push(token),
+                    }
+                }
+                "since" => {
+                    if crate::search::parse_date(value, now).is_ok() {
+                        filters.since = Some(value.to_string());
+                    } else {
+                        free_words.push(token);
+                    }
+                }
+                "until" => {
+                    if crate::search::parse_date(value, now).is_ok() {
+                        filters.until = Some(value.to_string());
+                    } else {
+                        free_words.push(token);
+                    }
+                }
+                "dur" | "duration" => {
+                    filters.duration = Some(value.to_string());
+                }
+                _ => {
+                    free_words.push(token);
+                }
+            }
+        } else {
+            free_words.push(token);
+        }
+    }
+
+    (filters, free_words.join(" "))
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Tab {
     #[default]
@@ -58,6 +119,7 @@ pub struct EditState {
     pub buffer: String,
 }
 
+#[derive(PartialEq, Debug)]
 pub struct FilterState {
     pub project: Option<String>,
     pub tag: Vec<String>,
@@ -65,6 +127,7 @@ pub struct FilterState {
     pub since: Option<String>,
     pub until: Option<String>,
     pub session: Option<String>,
+    pub duration: Option<String>,
 }
 
 impl Default for FilterState {
@@ -82,6 +145,7 @@ impl FilterState {
             since: None,
             until: None,
             session: None,
+            duration: None,
         }
     }
 
@@ -91,7 +155,7 @@ impl FilterState {
             project: self.project.clone(),
             tag: self.tag.clone(),
             exit: self.exit.clone(),
-            duration: None,
+            duration: self.duration.clone(),
             since: self.since.clone(),
             until: self.until.clone(),
             session: self.session.clone(),
@@ -109,6 +173,7 @@ pub enum Action {
 
 pub struct App {
     pub query: String,
+    pub fuzzy_query: String,
     pub all_rows: Vec<CommandRow>,
     pub filtered: Vec<usize>,
     pub selected: usize,
@@ -116,6 +181,7 @@ pub struct App {
     pub action: Option<Action>,
     pub tab: Tab,
     pub mode: Mode,
+    pub show_help: bool,
     pub workspaces: Vec<WorkspaceRow>,
     pub ws_selected: usize,
     pub ws_commands: Vec<CommandRow>,
@@ -142,6 +208,7 @@ impl App {
     pub fn new() -> Self {
         Self {
             query: String::new(),
+            fuzzy_query: String::new(),
             all_rows: vec![],
             filtered: vec![],
             selected: 0,
@@ -149,6 +216,7 @@ impl App {
             action: None,
             tab: Tab::History,
             mode: Mode::Insert,
+            show_help: false,
             workspaces: vec![],
             ws_selected: 0,
             ws_commands: vec![],
@@ -321,11 +389,22 @@ impl App {
     }
 
     pub fn recompute(&mut self) {
-        self.filtered = fuzzy::rank(&self.query, &self.all_rows);
+        self.filtered = fuzzy::rank(&self.fuzzy_query, &self.all_rows);
         let max = self.filtered.len().saturating_sub(1);
         if self.selected > max {
             self.selected = max;
         }
+    }
+
+    pub fn apply_query(&mut self, now: i64) {
+        let (filters, free) = parse_query(&self.query, now);
+        let changed = filters != self.filters;
+        self.filters = filters;
+        self.fuzzy_query = free;
+        if changed {
+            self.needs_history_reload = true;
+        }
+        self.recompute();
     }
 
     pub fn selected_command(&self) -> Option<&str> {
@@ -682,6 +761,7 @@ mod tests {
         let mut app = App::new();
         app.reload(&conn, 9999).unwrap();
         app.query = "docker".into();
+        app.fuzzy_query = "docker".into();
         app.recompute();
         assert_eq!(app.filtered.len(), 1);
         assert_eq!(app.all_rows[app.filtered[0]].command, "docker run nginx");
@@ -1018,6 +1098,136 @@ mod tests {
         });
         app.edit_cancel();
         assert!(app.edit.is_none());
+    }
+
+    const PARSE_NOW: i64 = 1_700_000_000;
+
+    #[test]
+    fn parse_query_project_and_free_text() {
+        let (fs, free) = parse_query("project:thoth cargo", PARSE_NOW);
+        assert_eq!(fs.project, Some("thoth".into()));
+        assert_eq!(free, "cargo");
+    }
+
+    #[test]
+    fn parse_query_short_project_alias() {
+        let (fs, free) = parse_query("p:web t:rust t:cli build", PARSE_NOW);
+        assert_eq!(fs.project, Some("web".into()));
+        assert!(fs.tag.contains(&"rust".to_string()));
+        assert!(fs.tag.contains(&"cli".to_string()));
+        assert_eq!(free, "build");
+    }
+
+    #[test]
+    fn parse_query_exit_fail() {
+        let (fs, free) = parse_query("exit:fail", PARSE_NOW);
+        assert_eq!(fs.exit, Some(ExitFilter::Fail));
+        assert!(free.is_empty());
+    }
+
+    #[test]
+    fn parse_query_exit_ok() {
+        let (fs, free) = parse_query("exit:ok", PARSE_NOW);
+        assert_eq!(fs.exit, Some(ExitFilter::Ok));
+        assert!(free.is_empty());
+    }
+
+    #[test]
+    fn parse_query_exit_bogus_becomes_free_text() {
+        let (fs, free) = parse_query("exit:bogus x", PARSE_NOW);
+        assert!(fs.exit.is_none());
+        assert!(free.contains("exit:bogus"));
+        assert!(free.contains('x'));
+    }
+
+    #[test]
+    fn parse_query_since_valid() {
+        let (fs, free) = parse_query("since:today ls", PARSE_NOW);
+        assert_eq!(fs.since, Some("today".into()));
+        assert_eq!(free, "ls");
+    }
+
+    #[test]
+    fn parse_query_since_invalid_becomes_free_text() {
+        let (fs, free) = parse_query("since:notadate ls", PARSE_NOW);
+        assert!(fs.since.is_none());
+        assert!(free.contains("since:notadate"));
+    }
+
+    #[test]
+    fn parse_query_duration() {
+        let (fs, free) = parse_query("dur:>30 ls", PARSE_NOW);
+        assert_eq!(fs.duration, Some(">30".into()));
+        assert_eq!(free, "ls");
+    }
+
+    #[test]
+    fn parse_query_empty_value_becomes_free_text() {
+        let (fs, free) = parse_query("project: ls", PARSE_NOW);
+        assert!(fs.project.is_none());
+        assert!(free.contains("project:"));
+        assert!(free.contains("ls"));
+    }
+
+    #[test]
+    fn parse_query_only_free_text() {
+        let input = "git status";
+        let (fs, free) = parse_query(input, PARSE_NOW);
+        assert!(fs.project.is_none());
+        assert!(fs.exit.is_none());
+        assert!(fs.tag.is_empty());
+        assert!(fs.since.is_none());
+        assert!(fs.until.is_none());
+        assert!(fs.duration.is_none());
+        assert_eq!(free, input);
+    }
+
+    #[test]
+    fn parse_query_combined_project_exit_free() {
+        let (fs, free) = parse_query("project:thoth exit:fail cargo", PARSE_NOW);
+        assert_eq!(fs.project, Some("thoth".into()));
+        assert_eq!(fs.exit, Some(ExitFilter::Fail));
+        assert_eq!(free, "cargo");
+    }
+
+    #[test]
+    fn apply_query_sets_filters_and_needs_reload_when_filters_change() {
+        let mut app = App::new();
+        app.query = "project:myapp".into();
+        app.apply_query(PARSE_NOW);
+        assert_eq!(app.filters.project, Some("myapp".into()));
+        assert!(app.needs_history_reload);
+        assert!(app.fuzzy_query.is_empty());
+    }
+
+    #[test]
+    fn apply_query_does_not_set_needs_reload_when_only_free_text_changes() {
+        let mut app = App::new();
+        app.query = "cargo".into();
+        app.apply_query(PARSE_NOW);
+        assert!(!app.needs_history_reload);
+        assert_eq!(app.fuzzy_query, "cargo");
+    }
+
+    #[test]
+    fn apply_query_recompute_uses_fuzzy_query() {
+        let conn = make_conn();
+        seed(&conn, "docker run nginx", 1000);
+        seed(&conn, "ls -la", 2000);
+        let mut app = App::new();
+        app.reload(&conn, 9999).unwrap();
+        app.query = "docker".into();
+        app.apply_query(PARSE_NOW);
+        assert_eq!(app.filtered.len(), 1);
+        assert_eq!(app.all_rows[app.filtered[0]].command, "docker run nginx");
+    }
+
+    #[test]
+    fn to_search_args_passes_duration_through() {
+        let mut fs = FilterState::new();
+        fs.duration = Some(">30".into());
+        let args = fs.to_search_args();
+        assert_eq!(args.duration, Some(">30".into()));
     }
 
     #[test]
