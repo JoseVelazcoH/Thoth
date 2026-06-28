@@ -194,6 +194,97 @@ fn render_tab_bar(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
+fn render_preview(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, now: i64) {
+    let theme = &app.theme;
+    let dim_style = Style::default().fg(theme.dim).add_modifier(Modifier::DIM);
+    let border_style = Style::default().fg(theme.border);
+
+    let preview_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title(Span::styled(" preview ", dim_style));
+
+    let inner = preview_block.inner(area);
+    frame.render_widget(preview_block, area);
+
+    let selected_row: Option<&CommandRow> = app
+        .filtered
+        .get(app.selected)
+        .and_then(|&idx| app.all_rows.get(idx));
+
+    let Some(row) = selected_row else {
+        return;
+    };
+
+    let label_style = Style::default().fg(theme.dim);
+    let cmd_style = Style::default().fg(theme.command);
+    let project_style = Style::default().fg(theme.project);
+    let dir_style = Style::default().fg(theme.dim);
+    let tag_style = Style::default().fg(theme.tags);
+    let exit_style = Style::default().fg(exit_color(row.exit_code, theme));
+
+    let tag_text = crate::tags::format_prompt_segment(&row.tags);
+    let tag_display = if tag_text.is_empty() {
+        "none".to_string()
+    } else {
+        tag_text
+    };
+
+    let workspace_display = row.workspace.as_deref().unwrap_or("-").to_string();
+    let duration_display = format_duration(row.duration_ms);
+    let when_display = format!(
+        "{} ({})",
+        crate::search::fmt_timestamp(row.timestamp),
+        format_relative(row.timestamp, now)
+    );
+    let exit_display = format!("{} ({})", exit_label(row.exit_code), row.exit_code);
+
+    let max_val_w = inner.width.saturating_sub(12) as usize;
+
+    let lines = vec![
+        Line::from(vec![Span::styled(
+            truncate(&display_command(&row.command), inner.width as usize),
+            cmd_style,
+        )]),
+        Line::from(vec![
+            Span::styled("project   ", label_style),
+            Span::styled(truncate(&row.project, max_val_w), project_style),
+        ]),
+        Line::from(vec![
+            Span::styled("directory ", label_style),
+            Span::styled(truncate(&row.directory, max_val_w), dir_style),
+        ]),
+        Line::from(vec![
+            Span::styled("exit      ", label_style),
+            Span::styled(truncate(&exit_display, max_val_w), exit_style),
+        ]),
+        Line::from(vec![
+            Span::styled("duration  ", label_style),
+            Span::styled(truncate(&duration_display, max_val_w), label_style),
+        ]),
+        Line::from(vec![
+            Span::styled("when      ", label_style),
+            Span::styled(truncate(&when_display, max_val_w), label_style),
+        ]),
+        Line::from(vec![
+            Span::styled("tags      ", label_style),
+            Span::styled(truncate(&tag_display, max_val_w), tag_style),
+        ]),
+        Line::from(vec![
+            Span::styled("workspace ", label_style),
+            Span::styled(truncate(&workspace_display, max_val_w), label_style),
+        ]),
+        Line::from(vec![
+            Span::styled("session   ", label_style),
+            Span::styled(truncate(&row.session_id, max_val_w), label_style),
+        ]),
+    ];
+
+    let paragraph = Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false });
+    frame.render_widget(paragraph, inner);
+}
+
 fn render_history_pane(
     frame: &mut Frame,
     area: ratatui::layout::Rect,
@@ -203,6 +294,12 @@ fn render_history_pane(
     columns: &[Column],
     table_state: &mut TableState,
 ) {
+    let h_chunks = Layout::horizontal([Constraint::Percentage(60), Constraint::Min(1)]).split(area);
+    let list_area = h_chunks[0];
+    let preview_area = h_chunks[1];
+
+    render_preview(frame, preview_area, app, now);
+
     let theme = &app.theme;
     let dim_style = Style::default().fg(theme.dim).add_modifier(Modifier::DIM);
     let border_style = Style::default().fg(theme.border);
@@ -213,8 +310,8 @@ fn render_history_pane(
         .border_style(border_style)
         .title(Span::styled(" history ", dim_style));
 
-    let inner_list_area = list_block.inner(area);
-    frame.render_widget(list_block, area);
+    let inner_list_area = list_block.inner(list_area);
+    frame.render_widget(list_block, list_area);
 
     let has_command_col = columns.iter().any(|c| matches!(c, Column::Command));
     let n_cols = columns.len();
@@ -1436,8 +1533,18 @@ mod tests {
     }
 
     fn row_y_of(text: &str, buf: &ratatui::buffer::Buffer, width: u16, height: u16) -> Option<u16> {
+        row_y_of_in_x_range(text, buf, 0, width, height)
+    }
+
+    fn row_y_of_in_x_range(
+        text: &str,
+        buf: &ratatui::buffer::Buffer,
+        x_start: u16,
+        x_end: u16,
+        height: u16,
+    ) -> Option<u16> {
         for row in 0..height {
-            let line: String = (0..width)
+            let line: String = (x_start..x_end)
                 .map(|col| buf[(col, row)].symbol().chars().next().unwrap_or(' '))
                 .collect();
             if line.contains(text) {
@@ -1451,10 +1558,11 @@ mod tests {
     fn newest_command_renders_below_oldest() {
         let app = app_bottom_anchored();
         let (_, buf) = render_app_small(&app, TEST_WIDTH, TEST_HEIGHT);
-        let newest_y = row_y_of("newest-cmd", &buf, TEST_WIDTH, TEST_HEIGHT)
-            .expect("newest-cmd must appear in buffer");
-        let oldest_y = row_y_of("oldest-cmd", &buf, TEST_WIDTH, TEST_HEIGHT)
-            .expect("oldest-cmd must appear in buffer");
+        let list_pane_right = TEST_WIDTH * 60 / 100;
+        let newest_y = row_y_of_in_x_range("newest-cmd", &buf, 0, list_pane_right, TEST_HEIGHT)
+            .expect("newest-cmd must appear in list pane");
+        let oldest_y = row_y_of_in_x_range("oldest-cmd", &buf, 0, list_pane_right, TEST_HEIGHT)
+            .expect("oldest-cmd must appear in list pane");
         assert!(
             newest_y > oldest_y,
             "newest command must appear on a lower (higher y) row than oldest; newest_y={newest_y} oldest_y={oldest_y}"
@@ -1675,9 +1783,10 @@ mod tests {
     }
 
     fn visible_commands(buf: &ratatui::buffer::Buffer, width: u16, height: u16) -> Vec<String> {
+        let list_pane_right = width * 60 / 100;
         let mut seen = Vec::new();
         for row in 0..height {
-            let line: String = (0..width)
+            let line: String = (0..list_pane_right)
                 .map(|col| buf[(col, row)].symbol().chars().next().unwrap_or(' '))
                 .collect();
             for i in 0..12u32 {
@@ -1891,8 +2000,10 @@ mod tests {
             "reduced cols must NOT show 'time' header; got:\n{text}"
         );
         assert!(
-            !text.contains("dur"),
-            "reduced cols must NOT show 'dur' header; got:\n{text}"
+            !text
+                .lines()
+                .any(|l| l.starts_with('│') && l.contains(" dur ") && l.len() < 30),
+            "reduced cols must NOT show 'dur' column header in the list pane; got:\n{text}"
         );
         assert!(
             text.contains("my-cmd"),
@@ -2316,6 +2427,298 @@ mod tests {
         assert!(
             text.contains("edit"),
             "Workspaces Commands controls must contain 'edit' hint; got:\n{text}"
+        );
+    }
+
+    fn render_app_wide(app: &App) -> (String, ratatui::buffer::Buffer) {
+        const W: u16 = 120;
+        const H: u16 = 16;
+        let cols = default_cols();
+        let backend = TestBackend::new(W, H);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ts = TableState::default();
+        terminal
+            .draw(|f| draw(f, app, TEST_NOW, true, &cols, &mut ts))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut lines: Vec<String> = Vec::new();
+        for row in 0..H {
+            let mut line = String::new();
+            for col in 0..W {
+                line.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+            }
+            lines.push(line.trim_end().to_string());
+        }
+        (lines.join("\n"), buf)
+    }
+
+    struct RowSpec<'a> {
+        cmd: &'a str,
+        ts: i64,
+        exit: i64,
+        project: &'a str,
+        directory: &'a str,
+        tags: &'a str,
+        workspace: Option<&'a str>,
+        session_id: &'a str,
+        duration_ms: i64,
+    }
+
+    fn make_row_full(s: RowSpec<'_>) -> CommandRow {
+        CommandRow {
+            id: 0,
+            command: s.cmd.to_string(),
+            timestamp: s.ts,
+            exit_code: s.exit,
+            project: s.project.to_string(),
+            directory: s.directory.to_string(),
+            tags: s.tags.to_string(),
+            session_id: s.session_id.to_string(),
+            duration_ms: s.duration_ms,
+            workspace: s.workspace.map(|w| w.to_string()),
+        }
+    }
+
+    #[test]
+    fn history_tab_shows_preview_block_title() {
+        let mut app = App::new();
+        app.all_rows = vec![make_row_full(RowSpec {
+            cmd: "git status",
+            ts: TEST_NOW - 60,
+            exit: 0,
+            project: "myproject",
+            directory: "/home/user/myproject",
+            tags: "[]",
+            workspace: None,
+            session_id: "sess-abc",
+            duration_ms: 250,
+        })];
+        app.recompute();
+        let (text, _) = render_app_wide(&app);
+        assert!(
+            text.contains("preview"),
+            "History tab must show 'preview' block title; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn history_tab_preview_shows_selected_command() {
+        let mut app = App::new();
+        app.all_rows = vec![make_row_full(RowSpec {
+            cmd: "cargo test --release",
+            ts: TEST_NOW - 60,
+            exit: 0,
+            project: "myproject",
+            directory: "/home/user/myproject",
+            tags: "[]",
+            workspace: None,
+            session_id: "sess-abc",
+            duration_ms: 1500,
+        })];
+        app.recompute();
+        let (text, _) = render_app_wide(&app);
+        assert!(
+            text.contains("cargo test --release"),
+            "preview pane must show selected command text; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn history_tab_preview_shows_project_and_directory() {
+        let mut app = App::new();
+        app.all_rows = vec![make_row_full(RowSpec {
+            cmd: "ls",
+            ts: TEST_NOW - 60,
+            exit: 0,
+            project: "proj-preview",
+            directory: "/srv/preview-dir",
+            tags: "[]",
+            workspace: None,
+            session_id: "sess-1",
+            duration_ms: 10,
+        })];
+        app.recompute();
+        let (text, _) = render_app_wide(&app);
+        assert!(
+            text.contains("proj-preview"),
+            "preview pane must show project name; got:\n{text}"
+        );
+        assert!(
+            text.contains("/srv/preview-dir"),
+            "preview pane must show directory; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn history_tab_preview_shows_exit_status() {
+        let mut app = App::new();
+        app.all_rows = vec![make_row_full(RowSpec {
+            cmd: "bad-cmd",
+            ts: TEST_NOW - 60,
+            exit: 1,
+            project: "p",
+            directory: "/tmp",
+            tags: "[]",
+            workspace: None,
+            session_id: "sess-1",
+            duration_ms: 10,
+        })];
+        app.recompute();
+        let (text, _) = render_app_wide(&app);
+        assert!(
+            text.contains("fail"),
+            "preview pane must show exit status 'fail'; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn history_tab_preview_changes_on_selection_change() {
+        use crate::tui::event::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let mut app = App::new();
+        app.all_rows = vec![
+            make_row_full(RowSpec {
+                cmd: "first-unique-cmd",
+                ts: TEST_NOW - 60,
+                exit: 0,
+                project: "proj-a",
+                directory: "/tmp/a",
+                tags: "[]",
+                workspace: None,
+                session_id: "s1",
+                duration_ms: 100,
+            }),
+            make_row_full(RowSpec {
+                cmd: "second-unique-cmd",
+                ts: TEST_NOW - 120,
+                exit: 0,
+                project: "proj-b",
+                directory: "/tmp/b",
+                tags: "[]",
+                workspace: None,
+                session_id: "s2",
+                duration_ms: 200,
+            }),
+        ];
+        app.recompute();
+
+        let (text_before, _) = render_app_wide(&app);
+        assert!(
+            text_before.contains("first-unique-cmd"),
+            "preview must show first command initially; got:\n{text_before}"
+        );
+
+        handle_key(
+            KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            },
+            &mut app,
+        );
+
+        let (text_after, _) = render_app_wide(&app);
+        assert!(
+            text_after.contains("second-unique-cmd"),
+            "preview must show second command after Up; got:\n{text_after}"
+        );
+    }
+
+    #[test]
+    fn history_tab_list_pane_still_shows_history_block() {
+        let mut app = App::new();
+        app.all_rows = vec![make_row_full(RowSpec {
+            cmd: "git log --oneline",
+            ts: TEST_NOW - 60,
+            exit: 0,
+            project: "p",
+            directory: "/tmp",
+            tags: "[]",
+            workspace: None,
+            session_id: "s1",
+            duration_ms: 50,
+        })];
+        app.recompute();
+        let (text, _) = render_app_wide(&app);
+        assert!(
+            text.contains("history"),
+            "left pane must still show 'history' block title; got:\n{text}"
+        );
+        assert!(
+            text.contains("git log --oneline"),
+            "left pane must still show command in list; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn history_tab_empty_list_shows_empty_preview() {
+        let app = App::new();
+        let (text, _) = render_app_wide(&app);
+        assert!(
+            text.contains("preview"),
+            "preview block must still render when list is empty; got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn dump_history_preview_buffer() {
+        const W: u16 = 120;
+        const H: u16 = 16;
+
+        let mut app = App::new();
+        app.all_rows = vec![
+            make_row_full(RowSpec {
+                cmd: "cargo test --release",
+                ts: TEST_NOW - 60,
+                exit: 0,
+                project: "thoth",
+                directory: "/home/jose/thoth",
+                tags: r#"["build","ci"]"#,
+                workspace: Some("dev"),
+                session_id: "sess-abc123",
+                duration_ms: 4200,
+            }),
+            make_row_full(RowSpec {
+                cmd: "git status",
+                ts: TEST_NOW - 120,
+                exit: 1,
+                project: "thoth",
+                directory: "/home/jose/thoth",
+                tags: "[]",
+                workspace: None,
+                session_id: "sess-abc123",
+                duration_ms: 10,
+            }),
+        ];
+        app.recompute();
+
+        let cols = default_cols();
+        let backend = TestBackend::new(W, H);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ts = TableState::default();
+        terminal
+            .draw(|f| draw(f, &app, TEST_NOW, true, &cols, &mut ts))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut lines: Vec<String> = Vec::new();
+        for row in 0..H {
+            let mut line = String::new();
+            for col in 0..W {
+                line.push(buf[(col, row)].symbol().chars().next().unwrap_or(' '));
+            }
+            lines.push(line.trim_end().to_string());
+        }
+        let text = lines.join("\n");
+        println!("=== HISTORY WITH PREVIEW PANE (120x16) ===");
+        println!("{text}");
+
+        assert!(text.contains("history"), "left pane title must appear");
+        assert!(text.contains("preview"), "right pane title must appear");
+        assert!(
+            text.contains("cargo test --release"),
+            "selected command must appear"
         );
     }
 }
