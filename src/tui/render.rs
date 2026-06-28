@@ -138,7 +138,7 @@ fn col_text(col: &Column, row: &CommandRow, now: i64) -> String {
         Column::Exit => exit_label(row.exit_code).to_string(),
         Column::Project => row.project.clone(),
         Column::Command => display_command(&row.command),
-        Column::Tags => row.tags.clone(),
+        Column::Tags => crate::tags::format_prompt_segment(&row.tags),
         Column::Directory => row.directory.clone(),
     }
 }

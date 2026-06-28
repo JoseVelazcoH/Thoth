@@ -17,8 +17,14 @@ pub fn rank(query: &str, items: &[CommandRow]) -> Vec<usize> {
         .iter()
         .enumerate()
         .filter_map(|(i, row)| {
+            let tag_text = crate::tags::parse_active(&row.tags).join(" ");
+            let hay = if tag_text.is_empty() {
+                row.command.clone()
+            } else {
+                format!("{} {tag_text}", row.command)
+            };
             let mut haystack_buf = Vec::new();
-            let haystack = Utf32Str::new(&row.command, &mut haystack_buf);
+            let haystack = Utf32Str::new(&hay, &mut haystack_buf);
             pattern.score(haystack, &mut matcher).map(|s| (i, s))
         })
         .collect();
@@ -44,6 +50,30 @@ mod tests {
             session_id: String::new(),
             workspace: None,
         }
+    }
+
+    fn row_with_tags(command: &str, tags: &str) -> CommandRow {
+        let mut r = row(command);
+        r.tags = tags.to_string();
+        r
+    }
+
+    #[test]
+    fn query_matches_a_tag_not_in_the_command() {
+        let items = vec![
+            row_with_tags("cargo build", r#"["release","perf"]"#),
+            row_with_tags("ls -la", r#"["files"]"#),
+        ];
+        let result = rank("release", &items);
+        assert_eq!(
+            result.first(),
+            Some(&0),
+            "command tagged 'release' must match"
+        );
+        assert!(
+            !result.contains(&1),
+            "untagged-for-release row must not match"
+        );
     }
 
     #[test]
