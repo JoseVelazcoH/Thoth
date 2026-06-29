@@ -155,6 +155,78 @@ fn mocha_theme() -> Theme {
     }
 }
 
+fn dracula_theme() -> Theme {
+    Theme {
+        selection_bg: rgb(0x44, 0x47, 0x5a),
+        selection_fg: rgb(0xf8, 0xf8, 0xf2),
+        accent: rgb(0x8b, 0xe9, 0xfd),
+        dim: rgb(0x62, 0x72, 0xa4),
+        border: rgb(0x62, 0x72, 0xa4),
+        ok: rgb(0x50, 0xfa, 0x7b),
+        fail: rgb(0xff, 0x55, 0x55),
+        project: rgb(0xbd, 0x93, 0xf9),
+        command: rgb(0xf8, 0xf8, 0xf2),
+        header: rgb(0xff, 0x79, 0xc6),
+        controls: rgb(0xff, 0x79, 0xc6),
+        directory: rgb(0x62, 0x72, 0xa4),
+        tags: rgb(0xf8, 0xf8, 0xf2),
+    }
+}
+
+fn tokyonight_theme() -> Theme {
+    Theme {
+        selection_bg: rgb(0x28, 0x34, 0x57),
+        selection_fg: rgb(0xc0, 0xca, 0xf5),
+        accent: rgb(0x7d, 0xcf, 0xff),
+        dim: rgb(0x56, 0x5f, 0x89),
+        border: rgb(0x56, 0x5f, 0x89),
+        ok: rgb(0x9e, 0xce, 0x6a),
+        fail: rgb(0xf7, 0x76, 0x8e),
+        project: rgb(0x7a, 0xa2, 0xf7),
+        command: rgb(0xc0, 0xca, 0xf5),
+        header: rgb(0xbb, 0x9a, 0xf7),
+        controls: rgb(0xbb, 0x9a, 0xf7),
+        directory: rgb(0x56, 0x5f, 0x89),
+        tags: rgb(0xc0, 0xca, 0xf5),
+    }
+}
+
+fn rosepine_theme() -> Theme {
+    Theme {
+        selection_bg: rgb(0x26, 0x23, 0x3a),
+        selection_fg: rgb(0xe0, 0xde, 0xf4),
+        accent: rgb(0x9c, 0xcf, 0xd8),
+        dim: rgb(0x6e, 0x6a, 0x86),
+        border: rgb(0x6e, 0x6a, 0x86),
+        ok: rgb(0x31, 0x74, 0x8f),
+        fail: rgb(0xeb, 0x6f, 0x92),
+        project: rgb(0xc4, 0xa7, 0xe7),
+        command: rgb(0xe0, 0xde, 0xf4),
+        header: rgb(0xf6, 0xc1, 0x77),
+        controls: rgb(0xf6, 0xc1, 0x77),
+        directory: rgb(0x6e, 0x6a, 0x86),
+        tags: rgb(0xe0, 0xde, 0xf4),
+    }
+}
+
+fn solarized_theme() -> Theme {
+    Theme {
+        selection_bg: rgb(0x07, 0x36, 0x42),
+        selection_fg: rgb(0x93, 0xa1, 0xa1),
+        accent: rgb(0x2a, 0xa1, 0x98),
+        dim: rgb(0x58, 0x6e, 0x75),
+        border: rgb(0x58, 0x6e, 0x75),
+        ok: rgb(0x85, 0x99, 0x00),
+        fail: rgb(0xdc, 0x32, 0x2f),
+        project: rgb(0x26, 0x8b, 0xd2),
+        command: rgb(0x83, 0x94, 0x96),
+        header: rgb(0x6c, 0x71, 0xc4),
+        controls: rgb(0x6c, 0x71, 0xc4),
+        directory: rgb(0x58, 0x6e, 0x75),
+        tags: rgb(0x83, 0x94, 0x96),
+    }
+}
+
 pub fn builtin_names() -> &'static [&'static str] {
     &[
         "default",
@@ -164,6 +236,10 @@ pub fn builtin_names() -> &'static [&'static str] {
         "frappe",
         "macchiato",
         "mocha",
+        "dracula",
+        "tokyonight",
+        "rosepine",
+        "solarized",
     ]
 }
 
@@ -176,6 +252,10 @@ pub fn builtin(name: &str) -> Option<Theme> {
         "frappe" => Some(frappe_theme()),
         "macchiato" => Some(macchiato_theme()),
         "mocha" => Some(mocha_theme()),
+        "dracula" => Some(dracula_theme()),
+        "tokyonight" => Some(tokyonight_theme()),
+        "rosepine" => Some(rosepine_theme()),
+        "solarized" => Some(solarized_theme()),
         _ => None,
     }
 }
@@ -336,15 +416,29 @@ mod tests {
     }
 
     #[test]
+    fn builtin_dracula_values() {
+        let t = builtin("dracula").unwrap();
+        assert_eq!(t.selection_bg, Color::Rgb(0x44, 0x47, 0x5a));
+        assert_eq!(t.fail, Color::Rgb(0xff, 0x55, 0x55));
+    }
+
+    #[test]
+    fn builtin_tokyonight_case_insensitive() {
+        assert!(builtin("TokyoNight").is_some());
+    }
+
+    #[test]
     fn builtin_unknown_is_none() {
         assert!(builtin("nope").is_none());
     }
 
     #[test]
-    fn builtin_names_has_seven() {
-        assert_eq!(builtin_names().len(), 7);
+    fn builtin_names_has_eleven() {
+        assert_eq!(builtin_names().len(), 11);
         assert!(builtin_names().contains(&"default"));
         assert!(builtin_names().contains(&"mocha"));
+        assert!(builtin_names().contains(&"dracula"));
+        assert!(builtin_names().contains(&"solarized"));
     }
 
     #[test]
@@ -365,9 +459,12 @@ mod tests {
             .iter()
             .map(|n| builtin(n).unwrap())
             .collect();
-        assert_eq!(themes.len(), 7);
+        assert_eq!(themes.len(), 11);
         let mocha = builtin("mocha").unwrap();
         let latte = builtin("latte").unwrap();
         assert_ne!(mocha, latte);
+        let dracula = builtin("dracula").unwrap();
+        let tokyonight = builtin("tokyonight").unwrap();
+        assert_ne!(dracula, tokyonight);
     }
 }

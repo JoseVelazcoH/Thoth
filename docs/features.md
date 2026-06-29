@@ -104,8 +104,9 @@ in its recorded directory.
 
 ## Themes
 
-Thoth ships 7 built-in themes: `default`, `ember`, `frost`, and the Catppuccin flavors:
-`latte`, `frappe`, `macchiato`, and `mocha`.
+Thoth ships 11 built-in themes: `default`, `ember`, `frost`, the Catppuccin flavors
+(`latte`, `frappe`, `macchiato`, `mocha`), plus `dracula`, `tokyonight`, `rosepine`,
+and `solarized`.
 
 ```sh
 tth theme list        # show available themes (built-in + your own)
