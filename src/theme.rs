@@ -227,6 +227,24 @@ fn solarized_theme() -> Theme {
     }
 }
 
+fn kanagawa_theme() -> Theme {
+    Theme {
+        selection_bg: rgb(0x2d, 0x4f, 0x67),
+        selection_fg: rgb(0xdc, 0xd7, 0xba),
+        accent: rgb(0x7f, 0xb4, 0xca),
+        dim: rgb(0x54, 0x54, 0x6d),
+        border: rgb(0x54, 0x54, 0x6d),
+        ok: rgb(0x98, 0xbb, 0x6c),
+        fail: rgb(0xc3, 0x40, 0x43),
+        project: rgb(0x7e, 0x9c, 0xd8),
+        command: rgb(0xdc, 0xd7, 0xba),
+        header: rgb(0x95, 0x7f, 0xb8),
+        controls: rgb(0x95, 0x7f, 0xb8),
+        directory: rgb(0x54, 0x54, 0x6d),
+        tags: rgb(0xdc, 0xd7, 0xba),
+    }
+}
+
 pub fn builtin_names() -> &'static [&'static str] {
     &[
         "default",
@@ -240,6 +258,7 @@ pub fn builtin_names() -> &'static [&'static str] {
         "tokyonight",
         "rosepine",
         "solarized",
+        "kanagawa",
     ]
 }
 
@@ -256,6 +275,7 @@ pub fn builtin(name: &str) -> Option<Theme> {
         "tokyonight" => Some(tokyonight_theme()),
         "rosepine" => Some(rosepine_theme()),
         "solarized" => Some(solarized_theme()),
+        "kanagawa" => Some(kanagawa_theme()),
         _ => None,
     }
 }
@@ -423,6 +443,18 @@ mod tests {
     }
 
     #[test]
+    fn builtin_kanagawa_values() {
+        let t = builtin("kanagawa").unwrap();
+        assert_eq!(t.selection_bg, Color::Rgb(0x2d, 0x4f, 0x67));
+        assert_eq!(t.project, Color::Rgb(0x7e, 0x9c, 0xd8));
+    }
+
+    #[test]
+    fn builtin_kanagawa_case_insensitive() {
+        assert!(builtin("Kanagawa").is_some());
+    }
+
+    #[test]
     fn builtin_tokyonight_case_insensitive() {
         assert!(builtin("TokyoNight").is_some());
     }
@@ -433,12 +465,13 @@ mod tests {
     }
 
     #[test]
-    fn builtin_names_has_eleven() {
-        assert_eq!(builtin_names().len(), 11);
+    fn builtin_names_has_twelve() {
+        assert_eq!(builtin_names().len(), 12);
         assert!(builtin_names().contains(&"default"));
         assert!(builtin_names().contains(&"mocha"));
         assert!(builtin_names().contains(&"dracula"));
         assert!(builtin_names().contains(&"solarized"));
+        assert!(builtin_names().contains(&"kanagawa"));
     }
 
     #[test]
@@ -459,7 +492,7 @@ mod tests {
             .iter()
             .map(|n| builtin(n).unwrap())
             .collect();
-        assert_eq!(themes.len(), 11);
+        assert_eq!(themes.len(), 12);
         let mocha = builtin("mocha").unwrap();
         let latte = builtin("latte").unwrap();
         assert_ne!(mocha, latte);
