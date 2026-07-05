@@ -164,7 +164,13 @@ default_limit = 50
 
 [theme]
 name = "default"
+
+[shell]
+keybinding = "^R"          # key that opens the finder; caret notation, or "none"
 ```
+
+Read or change any setting from the CLI, e.g. `tth config set shell.keybinding "^T"`
+(run `tth init` again afterwards so the shell hook picks up the new key).
 
 ### History filter
 
