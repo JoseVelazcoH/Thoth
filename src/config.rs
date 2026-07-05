@@ -10,6 +10,7 @@ const VALID_KEYS: &[(&str, &str)] = &[
     ("tui.orientation", r#""bottom" or "top""#),
     ("search.default_limit", "positive integer"),
     ("theme.name", "theme name string"),
+    ("shell.keybinding", "caret-notation key (e.g. \"^R\") or \"none\""),
 ];
 
 pub const DEFAULT_CONFIG_TOML: &str = r#"# Thoth configuration. All settings are optional; values shown are the defaults.
@@ -379,6 +380,8 @@ pub fn get_value(cfg: &Config, key: &str) -> Result<String, ThothError> {
             Ok(v.to_string())
         }
         "search.default_limit" => Ok(cfg.search.default_limit.to_string()),
+        "theme.name" => Ok(cfg.theme.name.clone()),
+        "shell.keybinding" => Ok(cfg.shell.keybinding.clone()),
         _ => Err(ThothError::Config(format!(
             "unknown key '{}'; valid keys: {}",
             key,
@@ -433,7 +436,7 @@ pub fn apply_set(existing_toml: &str, key: &str, value: &str) -> Result<String, 
                 .into_value()
                 .map_err(|e| ThothError::Config(format!("toml_edit error: {}", e)))?
         }
-        "theme.name" => toml_edit::value(value)
+        "theme.name" | "shell.keybinding" => toml_edit::value(value)
             .into_value()
             .map_err(|e| ThothError::Config(format!("toml_edit error: {}", e)))?,
         _ => {
@@ -539,7 +542,7 @@ pub fn render_config(cfg: &Config, path: &Path, exists: bool, color: bool) -> St
             "false".red().to_string()
         };
         format!(
-            "Config path: {}\nExists:      {}\n{} gap_minutes = {}\n{} orientation = {}\n{} default_limit = {}\n",
+            "Config path: {}\nExists:      {}\n{} gap_minutes = {}\n{} orientation = {}\n{} default_limit = {}\n{} name = {}\n{} keybinding = {}\n",
             path.display().to_string().yellow(),
             exists_str,
             "[session]".cyan(),
@@ -548,16 +551,22 @@ pub fn render_config(cfg: &Config, path: &Path, exists: bool, color: bool) -> St
             orientation.green(),
             "[search]".cyan(),
             cfg.search.default_limit.to_string().green(),
+            "[theme]".cyan(),
+            cfg.theme.name.clone().green(),
+            "[shell]".cyan(),
+            cfg.shell.keybinding.clone().green(),
         )
     } else {
         let exists_str = if exists { "true" } else { "false" };
         format!(
-            "Config path: {}\nExists:      {}\n[session] gap_minutes = {}\n[tui] orientation = {}\n[search] default_limit = {}\n",
+            "Config path: {}\nExists:      {}\n[session] gap_minutes = {}\n[tui] orientation = {}\n[search] default_limit = {}\n[theme] name = {}\n[shell] keybinding = {}\n",
             path.display(),
             exists_str,
             cfg.session.gap_minutes,
             orientation,
             cfg.search.default_limit,
+            cfg.theme.name,
+            cfg.shell.keybinding,
         )
     }
 }
@@ -638,6 +647,8 @@ mod tests {
         assert!(out.contains("gap_minutes = 30"));
         assert!(out.contains("orientation = bottom"));
         assert!(out.contains("default_limit = 50"));
+        assert!(out.contains("[theme] name = default"));
+        assert!(out.contains("[shell] keybinding = ^R"));
         assert!(out.contains("false"));
     }
 
@@ -728,6 +739,19 @@ mod tests {
     fn get_value_unknown_key_returns_err() {
         let cfg = Config::default();
         assert!(get_value(&cfg, "foo.bar").is_err());
+    }
+
+    #[test]
+    fn get_value_shell_keybinding() {
+        let cfg = Config::default();
+        assert_eq!(get_value(&cfg, "shell.keybinding").unwrap(), "^R");
+    }
+
+    #[test]
+    fn apply_set_shell_keybinding() {
+        let result = apply_set("", "shell.keybinding", "^T").unwrap();
+        assert!(result.contains("[shell]"));
+        assert!(result.contains("keybinding = \"^T\""));
     }
 
     #[test]
