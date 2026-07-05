@@ -47,6 +47,8 @@ pub fn default_rc_path(shell: &Shell, home: &Path) -> PathBuf {
     }
 }
 
+const KEYBIND_PLACEHOLDER: &str = "__THOTH_KEYBIND__";
+
 fn hook_body(shell: &Shell) -> &'static str {
     match shell {
         Shell::Bash => BASH_HOOK,
@@ -54,8 +56,154 @@ fn hook_body(shell: &Shell) -> &'static str {
     }
 }
 
-pub fn render_init(shell: &Shell) -> &'static str {
-    hook_body(shell)
+/// Translate a human keybinding like `ctrl+shift+left` into caret notation.
+///
+/// Modifiers (`ctrl`, `alt`/`meta`/`option`, `shift`) join the key with `+`,
+/// kitty-style. The key is a single character (`ctrl+r`) or a named navigation
+/// key (`left`, `right`, `up`, `down`, `home`, `end`, `pageup`, `pagedown`,
+/// `insert`, `delete`). Modified navigation keys use the xterm CSI encoding
+/// (e.g. `ctrl+shift+left` -> `^[[1;6D`), which most modern terminals emit.
+///
+/// Returns `None` when the value is not a `+`-combo we recognize, so raw caret
+/// notation (`^R`, `^[[1;6D`) still passes through untouched.
+fn human_to_caret(input: &str) -> Option<String> {
+    if !input.contains('+') {
+        return None;
+    }
+    let lower = input.to_ascii_lowercase();
+    let parts: Vec<&str> = lower.split('+').map(str::trim).collect();
+    let (key, mods) = parts.split_last()?;
+    let (mut ctrl, mut alt, mut shift) = (false, false, false);
+    for m in mods {
+        match *m {
+            "ctrl" | "control" => ctrl = true,
+            "alt" | "meta" | "option" | "opt" => alt = true,
+            "shift" => shift = true,
+            _ => return None,
+        }
+    }
+
+    if let Some(seq) = named_key_caret(key, ctrl, alt, shift) {
+        return Some(seq);
+    }
+
+    let mut chars = key.chars();
+    let c = chars.next()?;
+    if chars.next().is_some() || !c.is_ascii() {
+        return None;
+    }
+    let mut out = String::new();
+    if alt {
+        out.push_str("^[");
+    }
+    if ctrl {
+        if !c.is_ascii_alphabetic() {
+            return None;
+        }
+        out.push('^');
+        out.push(c.to_ascii_uppercase());
+    } else if shift {
+        out.push(c.to_ascii_uppercase());
+    } else {
+        out.push(c);
+    }
+    Some(out)
+}
+
+/// Caret notation for a named navigation key with modifiers, using the xterm
+/// modifier code `1 + shift + 2*alt + 4*ctrl`.
+fn named_key_caret(key: &str, ctrl: bool, alt: bool, shift: bool) -> Option<String> {
+    let letter_final = match key {
+        "up" => Some('A'),
+        "down" => Some('B'),
+        "right" => Some('C'),
+        "left" => Some('D'),
+        "home" => Some('H'),
+        "end" => Some('F'),
+        _ => None,
+    };
+    let tilde_num = match key {
+        "insert" | "ins" => Some(2),
+        "delete" | "del" => Some(3),
+        "pageup" | "pgup" => Some(5),
+        "pagedown" | "pgdn" | "pgdown" => Some(6),
+        _ => None,
+    };
+    if letter_final.is_none() && tilde_num.is_none() {
+        return None;
+    }
+    let modcode = 1 + u8::from(shift) + 2 * u8::from(alt) + 4 * u8::from(ctrl);
+    if let Some(fin) = letter_final {
+        return Some(if modcode == 1 {
+            format!("^[[{fin}")
+        } else {
+            format!("^[[1;{modcode}{fin}")
+        });
+    }
+    let n = tilde_num.unwrap();
+    Some(if modcode == 1 {
+        format!("^[[{n}~")
+    } else {
+        format!("^[[{n};{modcode}~")
+    })
+}
+
+/// Convert a keybinding to the shell's native form.
+///
+/// The value may be a human combo (`ctrl+shift+left`) or raw caret notation
+/// (`^[[1;6D`); the former is normalized to caret first. zsh understands caret
+/// notation directly, so it passes through. bash's `bind -x` expects backslash
+/// escapes, so caret tokens are rewritten: `^[` becomes `\e` and `^X` becomes
+/// `\C-x`; everything else is literal.
+fn shell_keybinding(shell: &Shell, keybinding: &str) -> String {
+    let caret = human_to_caret(keybinding).unwrap_or_else(|| keybinding.to_string());
+    match shell {
+        Shell::Zsh => caret,
+        Shell::Bash => caret_to_bash(&caret),
+    }
+}
+
+fn caret_to_bash(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '^' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => out.push_str("\\e"),
+            Some(ctrl) if ctrl.is_ascii_alphabetic() => {
+                out.push_str("\\C-");
+                out.push(ctrl.to_ascii_lowercase());
+            }
+            Some(other) => {
+                out.push('^');
+                out.push(other);
+            }
+            None => out.push('^'),
+        }
+    }
+    out
+}
+
+/// Render the shell integration script, binding the finder to `keybinding`.
+///
+/// An empty or `none` keybinding drops the binding line entirely, letting the
+/// user bind the widget themselves.
+pub fn render_init(shell: &Shell, keybinding: &str) -> String {
+    let body = hook_body(shell);
+    let key = keybinding.trim();
+    if key.is_empty() || key.eq_ignore_ascii_case("none") {
+        return body
+            .lines()
+            .filter(|line| !line.contains(KEYBIND_PLACEHOLDER))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+    }
+    let native = shell_keybinding(shell, key);
+    body.replace(KEYBIND_PLACEHOLDER, &native)
 }
 
 fn eval_line(shell: &Shell) -> String {
@@ -453,7 +601,7 @@ mod tests {
 
     #[test]
     fn render_init_zsh_returns_zsh_hook() {
-        let script = render_init(&Shell::Zsh);
+        let script = render_init(&Shell::Zsh, "^R");
         assert!(script.contains("_tth_preexec"));
         assert!(script.contains("bindkey '^R'"));
         assert!(!script.contains(SENTINEL_BEGIN));
@@ -461,10 +609,148 @@ mod tests {
 
     #[test]
     fn render_init_bash_returns_bash_hook() {
-        let script = render_init(&Shell::Bash);
+        let script = render_init(&Shell::Bash, "^R");
         assert!(script.contains("_thoth_preexec"));
         assert!(script.contains("bind -x"));
         assert!(!script.contains(SENTINEL_BEGIN));
+    }
+
+    #[test]
+    fn render_init_default_leaves_no_placeholder() {
+        let zsh = render_init(&Shell::Zsh, "^R");
+        let bash = render_init(&Shell::Bash, "^R");
+        assert!(!zsh.contains(KEYBIND_PLACEHOLDER));
+        assert!(!bash.contains(KEYBIND_PLACEHOLDER));
+    }
+
+    #[test]
+    fn render_init_bash_default_uses_control_r() {
+        let script = render_init(&Shell::Bash, "^R");
+        assert!(script.contains(r#"bind -x '"\C-r": _tth_widget'"#));
+    }
+
+    #[test]
+    fn render_init_zsh_custom_keybinding() {
+        let script = render_init(&Shell::Zsh, "^T");
+        assert!(script.contains("bindkey '^T'"));
+        assert!(!script.contains("bindkey '^R'"));
+    }
+
+    #[test]
+    fn render_init_bash_custom_keybinding_converted() {
+        let script = render_init(&Shell::Bash, "^T");
+        assert!(script.contains(r#"bind -x '"\C-t": _tth_widget'"#));
+    }
+
+    #[test]
+    fn human_to_caret_ctrl_letter() {
+        assert_eq!(human_to_caret("ctrl+r").unwrap(), "^R");
+    }
+
+    #[test]
+    fn human_to_caret_alt_letter() {
+        assert_eq!(human_to_caret("alt+x").unwrap(), "^[x");
+    }
+
+    #[test]
+    fn human_to_caret_ctrl_alt_letter() {
+        assert_eq!(human_to_caret("ctrl+alt+r").unwrap(), "^[^R");
+    }
+
+    #[test]
+    fn human_to_caret_ctrl_shift_left() {
+        assert_eq!(human_to_caret("ctrl+shift+left").unwrap(), "^[[1;6D");
+    }
+
+    #[test]
+    fn human_to_caret_alt_up() {
+        assert_eq!(human_to_caret("alt+up").unwrap(), "^[[1;3A");
+    }
+
+    #[test]
+    fn human_to_caret_ctrl_pageup() {
+        assert_eq!(human_to_caret("ctrl+pageup").unwrap(), "^[[5;5~");
+    }
+
+    #[test]
+    fn human_to_caret_case_insensitive() {
+        assert_eq!(human_to_caret("Ctrl+R").unwrap(), "^R");
+    }
+
+    #[test]
+    fn human_to_caret_raw_caret_passthrough_is_none() {
+        assert!(human_to_caret("^R").is_none());
+        assert!(human_to_caret("^[[1;6D").is_none());
+    }
+
+    #[test]
+    fn human_to_caret_unknown_modifier_is_none() {
+        assert!(human_to_caret("hyper+r").is_none());
+    }
+
+    #[test]
+    fn render_init_human_ctrl_r_zsh() {
+        let script = render_init(&Shell::Zsh, "ctrl+r");
+        assert!(script.contains("bindkey '^R'"));
+    }
+
+    #[test]
+    fn render_init_human_ctrl_shift_left_bash() {
+        let script = render_init(&Shell::Bash, "ctrl+shift+left");
+        assert!(script.contains(r#"bind -x '"\e[1;6D": _tth_widget'"#));
+    }
+
+    #[test]
+    fn render_init_human_alt_x_bash() {
+        let script = render_init(&Shell::Bash, "alt+x");
+        assert!(script.contains(r#"bind -x '"\ex": _tth_widget'"#));
+    }
+
+    #[test]
+    fn render_init_alt_ctrl_zsh_passthrough() {
+        let script = render_init(&Shell::Zsh, "^[^R");
+        assert!(script.contains("bindkey '^[^R'"));
+    }
+
+    #[test]
+    fn render_init_alt_ctrl_bash_converted() {
+        let script = render_init(&Shell::Bash, "^[^R");
+        assert!(script.contains(r#"bind -x '"\e\C-r": _tth_widget'"#));
+    }
+
+    #[test]
+    fn render_init_escape_sequence_bash_converted() {
+        // Ctrl-Shift-Left emits ESC [ 1 ; 6 D
+        let script = render_init(&Shell::Bash, "^[[1;6D");
+        assert!(script.contains(r#"bind -x '"\e[1;6D": _tth_widget'"#));
+    }
+
+    #[test]
+    fn render_init_escape_sequence_zsh_passthrough() {
+        let script = render_init(&Shell::Zsh, "^[[1;6D");
+        assert!(script.contains("bindkey '^[[1;6D'"));
+    }
+
+    #[test]
+    fn render_init_alt_letter_bash() {
+        // Alt-X is ESC then the literal letter
+        let script = render_init(&Shell::Bash, "^[x");
+        assert!(script.contains(r#"bind -x '"\ex": _tth_widget'"#));
+    }
+
+    #[test]
+    fn render_init_none_drops_binding_zsh() {
+        let script = render_init(&Shell::Zsh, "none");
+        assert!(!script.contains("bindkey"));
+        assert!(script.contains("_tth_widget"));
+        assert!(!script.contains(KEYBIND_PLACEHOLDER));
+    }
+
+    #[test]
+    fn render_init_empty_drops_binding_bash() {
+        let script = render_init(&Shell::Bash, "  ");
+        assert!(!script.contains("bind -x"));
+        assert!(!script.contains(KEYBIND_PLACEHOLDER));
     }
 
     #[test]

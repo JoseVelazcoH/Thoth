@@ -79,7 +79,7 @@ exec $SHELL     # reload your shell, or open a new terminal
 
 ## Quick start
 
-- Press **`Ctrl-R`** to open the interactive search.
+- Press **`Ctrl-R`** to open the interactive search (rebindable via `[shell] keybinding`).
 - **Type** to fuzzy-filter across the command, project, directory, and tags.
 - Press **`Esc`** for normal mode, then **`:`** to open the filter cmdline
   (e.g. `project:thoth exit:fail`), or **`?`** for help.

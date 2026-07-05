@@ -494,7 +494,11 @@ pub fn run() -> Result<(), crate::error::ThothError> {
         Some(Cmd::Init(args)) => {
             let shell_env = std::env::var("SHELL").ok();
             let shell = crate::hooks::detect_shell(args.shell.as_deref(), shell_env.as_deref())?;
-            print!("{}", crate::hooks::render_init(&shell));
+            let cfg = crate::config::load();
+            print!(
+                "{}",
+                crate::hooks::render_init(&shell, &cfg.shell.keybinding)
+            );
         }
         Some(Cmd::Tag(args)) => {
             if args.name.is_empty() {
