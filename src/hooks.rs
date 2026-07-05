@@ -56,22 +56,47 @@ fn hook_body(shell: &Shell) -> &'static str {
     }
 }
 
-/// Convert a caret-notation keybinding (e.g. `^R`) to the shell's native form.
+/// Convert a caret-notation keybinding to the shell's native form.
 ///
-/// zsh's `bindkey` accepts caret notation directly, while bash's `bind -x`
-/// expects `\C-x`. Non caret-style values pass through unchanged.
+/// The keybinding is written in caret notation, the same form zsh's `bindkey`
+/// accepts, so any sequence the terminal emits can be bound:
+///
+/// - `^R` is Ctrl-R
+/// - `^[` is Escape, which is also the Alt/Meta prefix, so `^[^R` is Alt-Ctrl-R
+/// - a raw escape sequence like `^[[1;6D` (Ctrl-Shift-Left) works verbatim
+///
+/// zsh understands caret notation directly, so it passes through unchanged.
+/// bash's `bind -x` expects backslash escapes, so caret tokens are rewritten:
+/// `^[` becomes `\e` and `^X` becomes `\C-x`; everything else is literal.
 fn shell_keybinding(shell: &Shell, keybinding: &str) -> String {
     match shell {
         Shell::Zsh => keybinding.to_string(),
-        Shell::Bash => {
-            if let Some(rest) = keybinding.strip_prefix('^') {
-                if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphabetic()) {
-                    return format!("\\C-{}", rest.to_ascii_lowercase());
-                }
+        Shell::Bash => caret_to_bash(keybinding),
+    }
+}
+
+fn caret_to_bash(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '^' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => out.push_str("\\e"),
+            Some(ctrl) if ctrl.is_ascii_alphabetic() => {
+                out.push_str("\\C-");
+                out.push(ctrl.to_ascii_lowercase());
             }
-            keybinding.to_string()
+            Some(other) => {
+                out.push('^');
+                out.push(other);
+            }
+            None => out.push('^'),
         }
     }
+    out
 }
 
 /// Render the shell integration script, binding the finder to `keybinding`.
@@ -527,6 +552,38 @@ mod tests {
     fn render_init_bash_custom_keybinding_converted() {
         let script = render_init(&Shell::Bash, "^T");
         assert!(script.contains(r#"bind -x '"\C-t": _tth_widget'"#));
+    }
+
+    #[test]
+    fn render_init_alt_ctrl_zsh_passthrough() {
+        let script = render_init(&Shell::Zsh, "^[^R");
+        assert!(script.contains("bindkey '^[^R'"));
+    }
+
+    #[test]
+    fn render_init_alt_ctrl_bash_converted() {
+        let script = render_init(&Shell::Bash, "^[^R");
+        assert!(script.contains(r#"bind -x '"\e\C-r": _tth_widget'"#));
+    }
+
+    #[test]
+    fn render_init_escape_sequence_bash_converted() {
+        // Ctrl-Shift-Left emits ESC [ 1 ; 6 D
+        let script = render_init(&Shell::Bash, "^[[1;6D");
+        assert!(script.contains(r#"bind -x '"\e[1;6D": _tth_widget'"#));
+    }
+
+    #[test]
+    fn render_init_escape_sequence_zsh_passthrough() {
+        let script = render_init(&Shell::Zsh, "^[[1;6D");
+        assert!(script.contains("bindkey '^[[1;6D'"));
+    }
+
+    #[test]
+    fn render_init_alt_letter_bash() {
+        // Alt-X is ESC then the literal letter
+        let script = render_init(&Shell::Bash, "^[x");
+        assert!(script.contains(r#"bind -x '"\ex": _tth_widget'"#));
     }
 
     #[test]

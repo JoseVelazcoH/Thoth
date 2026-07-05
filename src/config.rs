@@ -47,7 +47,9 @@ default_limit = 50
 # name = "default"
 
 # [shell]
-# Key that opens the interactive finder, in caret notation (e.g. "^R", "^T").
+# Key that opens the interactive finder, in caret notation. Examples:
+#   "^R" Ctrl-R   "^T" Ctrl-T   "^[^R" Alt-Ctrl-R   "^[[1;6D" Ctrl-Shift-Left
+# "^[" is Escape (the Alt/Meta prefix). Find a key's sequence with `cat -v`.
 # Set to "none" to skip binding a key and bind the widget yourself.
 # Takes effect after re-running `tth init` (regenerate your shell hook).
 # keybinding = "^R"

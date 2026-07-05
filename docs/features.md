@@ -172,6 +172,23 @@ keybinding = "^R"          # key that opens the finder; caret notation, or "none
 Read or change any setting from the CLI, e.g. `tth config set shell.keybinding "^T"`
 (run `tth init` again afterwards so the shell hook picks up the new key).
 
+#### Keybinding notation
+
+`shell.keybinding` uses caret notation, so any sequence the terminal emits can be bound:
+
+| Combination        | Value      | Notes                                  |
+| ------------------ | ---------- | -------------------------------------- |
+| Ctrl-R (default)   | `^R`       |                                        |
+| Ctrl-T             | `^T`       |                                        |
+| Alt-Ctrl-R         | `^[^R`     | `^[` is Escape, i.e. the Alt/Meta prefix |
+| Alt-X              | `^[x`      |                                        |
+| Ctrl-Shift-Left    | `^[[1;6D`  | a raw escape sequence                  |
+| (disabled)         | `none`     | bind the `_tth_widget` yourself        |
+
+There are no symbolic names (`ctrl+shift+left`): shells bind to the bytes a key sends,
+not to key labels. To find the sequence for a key, run `cat -v` (or `sed -n l`) and press
+it: e.g. Ctrl-Shift-Left prints `^[[1;6D`, which is exactly the value to use.
+
 ### History filter
 
 `[history] filter` is a list of regular expressions; any command matching one is **never
