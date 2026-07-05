@@ -47,6 +47,8 @@ pub fn default_rc_path(shell: &Shell, home: &Path) -> PathBuf {
     }
 }
 
+const KEYBIND_PLACEHOLDER: &str = "__THOTH_KEYBIND__";
+
 fn hook_body(shell: &Shell) -> &'static str {
     match shell {
         Shell::Bash => BASH_HOOK,
@@ -54,8 +56,41 @@ fn hook_body(shell: &Shell) -> &'static str {
     }
 }
 
-pub fn render_init(shell: &Shell) -> &'static str {
-    hook_body(shell)
+/// Convert a caret-notation keybinding (e.g. `^R`) to the shell's native form.
+///
+/// zsh's `bindkey` accepts caret notation directly, while bash's `bind -x`
+/// expects `\C-x`. Non caret-style values pass through unchanged.
+fn shell_keybinding(shell: &Shell, keybinding: &str) -> String {
+    match shell {
+        Shell::Zsh => keybinding.to_string(),
+        Shell::Bash => {
+            if let Some(rest) = keybinding.strip_prefix('^') {
+                if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphabetic()) {
+                    return format!("\\C-{}", rest.to_ascii_lowercase());
+                }
+            }
+            keybinding.to_string()
+        }
+    }
+}
+
+/// Render the shell integration script, binding the finder to `keybinding`.
+///
+/// An empty or `none` keybinding drops the binding line entirely, letting the
+/// user bind the widget themselves.
+pub fn render_init(shell: &Shell, keybinding: &str) -> String {
+    let body = hook_body(shell);
+    let key = keybinding.trim();
+    if key.is_empty() || key.eq_ignore_ascii_case("none") {
+        return body
+            .lines()
+            .filter(|line| !line.contains(KEYBIND_PLACEHOLDER))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+    }
+    let native = shell_keybinding(shell, key);
+    body.replace(KEYBIND_PLACEHOLDER, &native)
 }
 
 fn eval_line(shell: &Shell) -> String {
@@ -453,7 +488,7 @@ mod tests {
 
     #[test]
     fn render_init_zsh_returns_zsh_hook() {
-        let script = render_init(&Shell::Zsh);
+        let script = render_init(&Shell::Zsh, "^R");
         assert!(script.contains("_tth_preexec"));
         assert!(script.contains("bindkey '^R'"));
         assert!(!script.contains(SENTINEL_BEGIN));
@@ -461,10 +496,52 @@ mod tests {
 
     #[test]
     fn render_init_bash_returns_bash_hook() {
-        let script = render_init(&Shell::Bash);
+        let script = render_init(&Shell::Bash, "^R");
         assert!(script.contains("_thoth_preexec"));
         assert!(script.contains("bind -x"));
         assert!(!script.contains(SENTINEL_BEGIN));
+    }
+
+    #[test]
+    fn render_init_default_leaves_no_placeholder() {
+        let zsh = render_init(&Shell::Zsh, "^R");
+        let bash = render_init(&Shell::Bash, "^R");
+        assert!(!zsh.contains(KEYBIND_PLACEHOLDER));
+        assert!(!bash.contains(KEYBIND_PLACEHOLDER));
+    }
+
+    #[test]
+    fn render_init_bash_default_uses_control_r() {
+        let script = render_init(&Shell::Bash, "^R");
+        assert!(script.contains(r#"bind -x '"\C-r": _tth_widget'"#));
+    }
+
+    #[test]
+    fn render_init_zsh_custom_keybinding() {
+        let script = render_init(&Shell::Zsh, "^T");
+        assert!(script.contains("bindkey '^T'"));
+        assert!(!script.contains("bindkey '^R'"));
+    }
+
+    #[test]
+    fn render_init_bash_custom_keybinding_converted() {
+        let script = render_init(&Shell::Bash, "^T");
+        assert!(script.contains(r#"bind -x '"\C-t": _tth_widget'"#));
+    }
+
+    #[test]
+    fn render_init_none_drops_binding_zsh() {
+        let script = render_init(&Shell::Zsh, "none");
+        assert!(!script.contains("bindkey"));
+        assert!(script.contains("_tth_widget"));
+        assert!(!script.contains(KEYBIND_PLACEHOLDER));
+    }
+
+    #[test]
+    fn render_init_empty_drops_binding_bash() {
+        let script = render_init(&Shell::Bash, "  ");
+        assert!(!script.contains("bind -x"));
+        assert!(!script.contains(KEYBIND_PLACEHOLDER));
     }
 
     #[test]

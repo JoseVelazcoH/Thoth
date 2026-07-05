@@ -44,6 +44,9 @@ Press **`Ctrl-R`** (or run `tth`) to open the finder. As you type, the list filt
 with fuzzy matching across the command, project, directory, and tags. A preview pane on the
 right shows the full details of the highlighted entry.
 
+The trigger key is configurable via `[shell] keybinding` (caret notation, e.g. `"^T"`);
+set it to `"none"` to bind the widget yourself. Re-run `tth init` after changing it.
+
 #### Modes (vim-style)
 
 The finder is modal. **Insert** is the default (type to filter); `Esc` drops you into

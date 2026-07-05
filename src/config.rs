@@ -40,9 +40,16 @@ default_limit = 50
 # filter = ["^\\s*tth\\b", "--password", "export .*TOKEN"]
 
 # [theme]
-# Built-in themes: default, ember, frost, latte, frappe, macchiato, mocha
+# Built-in themes: default, ember, frost, latte, frappe, macchiato, mocha,
+# dracula, tokyonight, rosepine, solarized, kanagawa
 # You can also drop a <name>.toml file in ~/.config/thoth/themes/ for a custom theme.
 # name = "default"
+
+# [shell]
+# Key that opens the interactive finder, in caret notation (e.g. "^R", "^T").
+# Set to "none" to skip binding a key and bind the widget yourself.
+# Takes effect after re-running `tth init` (regenerate your shell hook).
+# keybinding = "^R"
 "#;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
@@ -153,6 +160,10 @@ fn default_theme_name() -> String {
     "default".into()
 }
 
+fn default_keybinding() -> String {
+    "^R".into()
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 #[serde(default)]
 pub struct ThemeSection {
@@ -168,6 +179,21 @@ impl Default for ThemeSection {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[serde(default)]
+pub struct ShellSection {
+    #[serde(default = "default_keybinding")]
+    pub keybinding: String,
+}
+
+impl Default for ShellSection {
+    fn default() -> Self {
+        Self {
+            keybinding: default_keybinding(),
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, Default, PartialEq)]
 #[serde(default)]
 pub struct Config {
@@ -176,6 +202,7 @@ pub struct Config {
     pub search: Search,
     pub history: History,
     pub theme: ThemeSection,
+    pub shell: ShellSection,
 }
 
 fn config_path_from(thoth_config: Option<&str>, xdg_config: Option<&str>, home: &Path) -> PathBuf {
@@ -775,6 +802,23 @@ mod tests {
     #[test]
     fn theme_section_default_name_is_default() {
         assert_eq!(ThemeSection::default().name, "default");
+    }
+
+    #[test]
+    fn shell_section_default_keybinding_is_ctrl_r() {
+        assert_eq!(ShellSection::default().keybinding, "^R");
+    }
+
+    #[test]
+    fn parse_empty_string_keybinding_is_default() {
+        let cfg = parse("").unwrap();
+        assert_eq!(cfg.shell.keybinding, "^R");
+    }
+
+    #[test]
+    fn parse_custom_keybinding() {
+        let cfg = parse("[shell]\nkeybinding = \"^T\"\n").unwrap();
+        assert_eq!(cfg.shell.keybinding, "^T");
     }
 
     #[test]

@@ -71,7 +71,7 @@ _tth_widget() {
     fi
 }
 
-bind -x '"\C-r": _tth_widget'
+bind -x '"__THOTH_KEYBIND__": _tth_widget'
 
 tth-tag() {
     eval "$(command tth tag "$1")"
