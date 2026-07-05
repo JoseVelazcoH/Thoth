@@ -10,7 +10,7 @@ const VALID_KEYS: &[(&str, &str)] = &[
     ("tui.orientation", r#""bottom" or "top""#),
     ("search.default_limit", "positive integer"),
     ("theme.name", "theme name string"),
-    ("shell.keybinding", "caret-notation key (e.g. \"^R\") or \"none\""),
+    ("shell.keybinding", "key combo (e.g. \"ctrl+r\") or \"none\""),
 ];
 
 pub const DEFAULT_CONFIG_TOML: &str = r#"# Thoth configuration. All settings are optional; values shown are the defaults.
@@ -47,12 +47,14 @@ default_limit = 50
 # name = "default"
 
 # [shell]
-# Key that opens the interactive finder, in caret notation. Examples:
-#   "^R" Ctrl-R   "^T" Ctrl-T   "^[^R" Alt-Ctrl-R   "^[[1;6D" Ctrl-Shift-Left
-# "^[" is Escape (the Alt/Meta prefix). Find a key's sequence with `cat -v`.
+# Key that opens the interactive finder. Combine modifiers with "+", e.g.
+#   "ctrl+r"   "ctrl+t"   "alt+x"   "ctrl+alt+r"   "ctrl+shift+left"
+# Modifiers: ctrl, alt, shift. Keys: a letter or a named nav key
+# (left/right/up/down, home, end, pageup, pagedown, insert, delete).
+# Raw caret notation (e.g. "^[[1;6D") also works for anything not covered.
 # Set to "none" to skip binding a key and bind the widget yourself.
 # Takes effect after re-running `tth init` (regenerate your shell hook).
-# keybinding = "^R"
+# keybinding = "ctrl+r"
 "#;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
@@ -164,7 +166,7 @@ fn default_theme_name() -> String {
 }
 
 fn default_keybinding() -> String {
-    "^R".into()
+    "ctrl+r".into()
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -650,7 +652,7 @@ mod tests {
         assert!(out.contains("orientation = bottom"));
         assert!(out.contains("default_limit = 50"));
         assert!(out.contains("[theme] name = default"));
-        assert!(out.contains("[shell] keybinding = ^R"));
+        assert!(out.contains("[shell] keybinding = ctrl+r"));
         assert!(out.contains("false"));
     }
 
@@ -746,7 +748,7 @@ mod tests {
     #[test]
     fn get_value_shell_keybinding() {
         let cfg = Config::default();
-        assert_eq!(get_value(&cfg, "shell.keybinding").unwrap(), "^R");
+        assert_eq!(get_value(&cfg, "shell.keybinding").unwrap(), "ctrl+r");
     }
 
     #[test]
@@ -832,13 +834,13 @@ mod tests {
 
     #[test]
     fn shell_section_default_keybinding_is_ctrl_r() {
-        assert_eq!(ShellSection::default().keybinding, "^R");
+        assert_eq!(ShellSection::default().keybinding, "ctrl+r");
     }
 
     #[test]
     fn parse_empty_string_keybinding_is_default() {
         let cfg = parse("").unwrap();
-        assert_eq!(cfg.shell.keybinding, "^R");
+        assert_eq!(cfg.shell.keybinding, "ctrl+r");
     }
 
     #[test]

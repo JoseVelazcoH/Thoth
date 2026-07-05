@@ -44,8 +44,8 @@ Press **`Ctrl-R`** (or run `tth`) to open the finder. As you type, the list filt
 with fuzzy matching across the command, project, directory, and tags. A preview pane on the
 right shows the full details of the highlighted entry.
 
-The trigger key is configurable via `[shell] keybinding` (caret notation, e.g. `"^T"`);
-set it to `"none"` to bind the widget yourself. Re-run `tth init` after changing it.
+The trigger key is configurable via `[shell] keybinding` (e.g. `"ctrl+t"`); set it to
+`"none"` to bind the widget yourself. Re-run `tth init` after changing it.
 
 #### Modes (vim-style)
 
@@ -166,28 +166,32 @@ default_limit = 50
 name = "default"
 
 [shell]
-keybinding = "^R"          # key that opens the finder; caret notation, or "none"
+keybinding = "ctrl+r"      # key that opens the finder; combo, or "none"
 ```
 
-Read or change any setting from the CLI, e.g. `tth config set shell.keybinding "^T"`
+Read or change any setting from the CLI, e.g. `tth config set shell.keybinding "ctrl+t"`
 (run `tth init` again afterwards so the shell hook picks up the new key).
 
 #### Keybinding notation
 
-`shell.keybinding` uses caret notation, so any sequence the terminal emits can be bound:
+`shell.keybinding` takes a kitty-style combo: modifiers joined to a key with `+`.
 
-| Combination        | Value      | Notes                                  |
-| ------------------ | ---------- | -------------------------------------- |
-| Ctrl-R (default)   | `^R`       |                                        |
-| Ctrl-T             | `^T`       |                                        |
-| Alt-Ctrl-R         | `^[^R`     | `^[` is Escape, i.e. the Alt/Meta prefix |
-| Alt-X              | `^[x`      |                                        |
-| Ctrl-Shift-Left    | `^[[1;6D`  | a raw escape sequence                  |
-| (disabled)         | `none`     | bind the `_tth_widget` yourself        |
+| Combination           | Value             |
+| --------------------- | ----------------- |
+| Ctrl-R (default)      | `ctrl+r`          |
+| Ctrl-T                | `ctrl+t`          |
+| Alt-X                 | `alt+x`           |
+| Ctrl-Alt-R            | `ctrl+alt+r`      |
+| Ctrl-Shift-Left       | `ctrl+shift+left` |
+| (disabled)            | `none`            |
 
-There are no symbolic names (`ctrl+shift+left`): shells bind to the bytes a key sends,
-not to key labels. To find the sequence for a key, run `cat -v` (or `sed -n l`) and press
-it: e.g. Ctrl-Shift-Left prints `^[[1;6D`, which is exactly the value to use.
+- **Modifiers**: `ctrl`, `alt` (aka `meta`/`option`), `shift`.
+- **Keys**: a single letter, or a named navigation key: `left`, `right`, `up`, `down`,
+  `home`, `end`, `pageup`, `pagedown`, `insert`, `delete`.
+
+Modified navigation keys are encoded as xterm CSI sequences (`ctrl+shift+left` becomes
+`\e[1;6D`), which modern terminals emit. For anything not covered you can still pass a
+raw escape sequence in caret notation (e.g. `^[[1;6D`); find a key's bytes with `cat -v`.
 
 ### History filter
 
