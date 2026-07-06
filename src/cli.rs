@@ -299,8 +299,24 @@ pub struct UninstallArgs {
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct ThemeArgs {
-    #[arg(help = "Theme name to switch to, or 'list' to list available themes")]
-    pub name: Option<String>,
+    #[command(subcommand)]
+    pub action: ThemeAction,
+}
+
+#[derive(clap::Subcommand, Debug, Clone)]
+pub enum ThemeAction {
+    #[command(about = "Preview the given theme")]
+    Preview,
+    #[command(about = "List available themes")]
+    List,
+    #[command(about = "Sets the given theme")]
+    Set(ThemeSetArgs),
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ThemeSetArgs {
+    #[arg(help = "Theme name to set")]
+    pub name: String,
 }
 
 pub fn run() -> Result<(), crate::error::ThothError> {
@@ -692,11 +708,11 @@ pub fn run() -> Result<(), crate::error::ThothError> {
         Some(Cmd::Theme(args)) => {
             let cfg = crate::config::load();
             let themes_dir = crate::config::resolve_themes_dir();
-            match args.name.as_deref() {
-                None => {
+            match args.action {
+                ThemeAction::Preview => {
                     println!("Current theme: {}", cfg.theme.name);
                 }
-                Some("list") => {
+                ThemeAction::List => {
                     let current = &cfg.theme.name;
                     println!("Built-in themes:");
                     for name in crate::theme::builtin_names() {
@@ -718,18 +734,18 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                         }
                     }
                 }
-                Some(name) => {
-                    if !crate::config::theme_exists(name, &themes_dir) {
+                ThemeAction::Set(a) => {
+                    if !crate::config::theme_exists(&a.name, &themes_dir) {
                         let builtin_list = crate::theme::builtin_names().join(", ");
                         return Err(crate::error::ThothError::Config(format!(
                             "unknown theme '{}'; built-in themes: {}; user themes go in {}",
-                            name,
+                            a.name,
                             builtin_list,
                             themes_dir.display()
                         )));
                     }
-                    crate::config::write_set("theme.name", name)?;
-                    println!("Theme set to '{}'. Reopen the TUI to see it.", name);
+                    crate::config::write_set("theme.name", &a.name)?;
+                    println!("Theme set to '{}'. Reopen the TUI to see it.", a.name);
                 }
             }
         }
