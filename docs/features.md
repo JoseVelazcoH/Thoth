@@ -44,6 +44,9 @@ Press **`Ctrl-R`** (or run `tth`) to open the finder. As you type, the list filt
 with fuzzy matching across the command, project, directory, and tags. A preview pane on the
 right shows the full details of the highlighted entry.
 
+The trigger key is configurable via `[shell] keybinding` (e.g. `"ctrl+t"`); set it to
+`"none"` to bind the widget yourself. Re-run `tth init` after changing it.
+
 #### Modes (vim-style)
 
 The finder is modal. **Insert** is the default (type to filter); `Esc` drops you into
@@ -104,8 +107,9 @@ in its recorded directory.
 
 ## Themes
 
-Thoth ships 7 built-in themes: `default`, `ember`, `frost`, and the Catppuccin flavors:
-`latte`, `frappe`, `macchiato`, and `mocha`.
+Thoth ships 12 built-in themes: `default`, `ember`, `frost`, the Catppuccin flavors
+(`latte`, `frappe`, `macchiato`, `mocha`), plus `dracula`, `tokyonight`, `rosepine`,
+`solarized`, and `kanagawa`.
 
 ```sh
 tth theme list        # show available themes (built-in + your own)
@@ -160,7 +164,34 @@ default_limit = 50
 
 [theme]
 name = "default"
+
+[shell]
+keybinding = "ctrl+r"      # key that opens the finder; combo, or "none"
 ```
+
+Read or change any setting from the CLI, e.g. `tth config set shell.keybinding "ctrl+t"`
+(run `tth init` again afterwards so the shell hook picks up the new key).
+
+#### Keybinding notation
+
+`shell.keybinding` takes a kitty-style combo: modifiers joined to a key with `+`.
+
+| Combination           | Value             |
+| --------------------- | ----------------- |
+| Ctrl-R (default)      | `ctrl+r`          |
+| Ctrl-T                | `ctrl+t`          |
+| Alt-X                 | `alt+x`           |
+| Ctrl-Alt-R            | `ctrl+alt+r`      |
+| Ctrl-Shift-Left       | `ctrl+shift+left` |
+| (disabled)            | `none`            |
+
+- **Modifiers**: `ctrl`, `alt` (aka `meta`/`option`), `shift`.
+- **Keys**: a single letter, or a named navigation key: `left`, `right`, `up`, `down`,
+  `home`, `end`, `pageup`, `pagedown`, `insert`, `delete`.
+
+Modified navigation keys are encoded as xterm CSI sequences (`ctrl+shift+left` becomes
+`\e[1;6D`), which modern terminals emit. For anything not covered you can still pass a
+raw escape sequence in caret notation (e.g. `^[[1;6D`); find a key's bytes with `cat -v`.
 
 ### History filter
 

@@ -10,6 +10,7 @@ const VALID_KEYS: &[(&str, &str)] = &[
     ("tui.orientation", r#""bottom" or "top""#),
     ("search.default_limit", "positive integer"),
     ("theme.name", "theme name string"),
+    ("shell.keybinding", "key combo (e.g. \"ctrl+r\") or \"none\""),
 ];
 
 pub const DEFAULT_CONFIG_TOML: &str = r#"# Thoth configuration. All settings are optional; values shown are the defaults.
@@ -40,9 +41,20 @@ default_limit = 50
 # filter = ["^\\s*tth\\b", "--password", "export .*TOKEN"]
 
 # [theme]
-# Built-in themes: default, ember, frost, latte, frappe, macchiato, mocha
+# Built-in themes: default, ember, frost, latte, frappe, macchiato, mocha,
+# dracula, tokyonight, rosepine, solarized, kanagawa
 # You can also drop a <name>.toml file in ~/.config/thoth/themes/ for a custom theme.
 # name = "default"
+
+# [shell]
+# Key that opens the interactive finder. Combine modifiers with "+", e.g.
+#   "ctrl+r"   "ctrl+t"   "alt+x"   "ctrl+alt+r"   "ctrl+shift+left"
+# Modifiers: ctrl, alt, shift. Keys: a letter or a named nav key
+# (left/right/up/down, home, end, pageup, pagedown, insert, delete).
+# Raw caret notation (e.g. "^[[1;6D") also works for anything not covered.
+# Set to "none" to skip binding a key and bind the widget yourself.
+# Takes effect after re-running `tth init` (regenerate your shell hook).
+# keybinding = "ctrl+r"
 "#;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
@@ -153,6 +165,10 @@ fn default_theme_name() -> String {
     "default".into()
 }
 
+fn default_keybinding() -> String {
+    "ctrl+r".into()
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 #[serde(default)]
 pub struct ThemeSection {
@@ -168,6 +184,21 @@ impl Default for ThemeSection {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[serde(default)]
+pub struct ShellSection {
+    #[serde(default = "default_keybinding")]
+    pub keybinding: String,
+}
+
+impl Default for ShellSection {
+    fn default() -> Self {
+        Self {
+            keybinding: default_keybinding(),
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, Default, PartialEq)]
 #[serde(default)]
 pub struct Config {
@@ -176,6 +207,7 @@ pub struct Config {
     pub search: Search,
     pub history: History,
     pub theme: ThemeSection,
+    pub shell: ShellSection,
 }
 
 fn config_path_from(thoth_config: Option<&str>, xdg_config: Option<&str>, home: &Path) -> PathBuf {
@@ -352,6 +384,8 @@ pub fn get_value(cfg: &Config, key: &str) -> Result<String, ThothError> {
             Ok(v.to_string())
         }
         "search.default_limit" => Ok(cfg.search.default_limit.to_string()),
+        "theme.name" => Ok(cfg.theme.name.clone()),
+        "shell.keybinding" => Ok(cfg.shell.keybinding.clone()),
         _ => Err(ThothError::Config(format!(
             "unknown key '{}'; valid keys: {}",
             key,
@@ -406,7 +440,7 @@ pub fn apply_set(existing_toml: &str, key: &str, value: &str) -> Result<String, 
                 .into_value()
                 .map_err(|e| ThothError::Config(format!("toml_edit error: {}", e)))?
         }
-        "theme.name" => toml_edit::value(value)
+        "theme.name" | "shell.keybinding" => toml_edit::value(value)
             .into_value()
             .map_err(|e| ThothError::Config(format!("toml_edit error: {}", e)))?,
         _ => {
@@ -512,7 +546,7 @@ pub fn render_config(cfg: &Config, path: &Path, exists: bool, color: bool) -> St
             "false".red().to_string()
         };
         format!(
-            "Config path: {}\nExists:      {}\n{} gap_minutes = {}\n{} orientation = {}\n{} default_limit = {}\n",
+            "Config path: {}\nExists:      {}\n{} gap_minutes = {}\n{} orientation = {}\n{} default_limit = {}\n{} name = {}\n{} keybinding = {}\n",
             path.display().to_string().yellow(),
             exists_str,
             "[session]".cyan(),
@@ -521,16 +555,22 @@ pub fn render_config(cfg: &Config, path: &Path, exists: bool, color: bool) -> St
             orientation.green(),
             "[search]".cyan(),
             cfg.search.default_limit.to_string().green(),
+            "[theme]".cyan(),
+            cfg.theme.name.clone().green(),
+            "[shell]".cyan(),
+            cfg.shell.keybinding.clone().green(),
         )
     } else {
         let exists_str = if exists { "true" } else { "false" };
         format!(
-            "Config path: {}\nExists:      {}\n[session] gap_minutes = {}\n[tui] orientation = {}\n[search] default_limit = {}\n",
+            "Config path: {}\nExists:      {}\n[session] gap_minutes = {}\n[tui] orientation = {}\n[search] default_limit = {}\n[theme] name = {}\n[shell] keybinding = {}\n",
             path.display(),
             exists_str,
             cfg.session.gap_minutes,
             orientation,
             cfg.search.default_limit,
+            cfg.theme.name,
+            cfg.shell.keybinding,
         )
     }
 }
@@ -611,6 +651,8 @@ mod tests {
         assert!(out.contains("gap_minutes = 30"));
         assert!(out.contains("orientation = bottom"));
         assert!(out.contains("default_limit = 50"));
+        assert!(out.contains("[theme] name = default"));
+        assert!(out.contains("[shell] keybinding = ctrl+r"));
         assert!(out.contains("false"));
     }
 
@@ -704,6 +746,19 @@ mod tests {
     }
 
     #[test]
+    fn get_value_shell_keybinding() {
+        let cfg = Config::default();
+        assert_eq!(get_value(&cfg, "shell.keybinding").unwrap(), "ctrl+r");
+    }
+
+    #[test]
+    fn apply_set_shell_keybinding() {
+        let result = apply_set("", "shell.keybinding", "^T").unwrap();
+        assert!(result.contains("[shell]"));
+        assert!(result.contains("keybinding = \"^T\""));
+    }
+
+    #[test]
     fn apply_set_gap_minutes_creates_section() {
         let result = apply_set("", "session.gap_minutes", "15").unwrap();
         assert!(result.contains("[session]"));
@@ -775,6 +830,23 @@ mod tests {
     #[test]
     fn theme_section_default_name_is_default() {
         assert_eq!(ThemeSection::default().name, "default");
+    }
+
+    #[test]
+    fn shell_section_default_keybinding_is_ctrl_r() {
+        assert_eq!(ShellSection::default().keybinding, "ctrl+r");
+    }
+
+    #[test]
+    fn parse_empty_string_keybinding_is_default() {
+        let cfg = parse("").unwrap();
+        assert_eq!(cfg.shell.keybinding, "ctrl+r");
+    }
+
+    #[test]
+    fn parse_custom_keybinding() {
+        let cfg = parse("[shell]\nkeybinding = \"^T\"\n").unwrap();
+        assert_eq!(cfg.shell.keybinding, "^T");
     }
 
     #[test]

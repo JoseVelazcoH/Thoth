@@ -251,7 +251,7 @@ fn render_preview(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, now
 
     let lines = vec![
         Line::from(vec![Span::styled(
-            truncate(&display_command(&row.command), inner.width as usize),
+            display_command(&row.command),
             cmd_style,
         )]),
         Line::from(vec![
@@ -1106,6 +1106,25 @@ mod tests {
             make_row("cargo build", TEST_NOW - 3400, 0, "proj-alpha"),
         ];
         app
+    }
+
+    #[test]
+    fn preview_shows_full_long_command_wrapped() {
+        // A command longer than the preview pane width must appear in full,
+        // wrapped across lines, not truncated with an ellipsis.
+        let long_cmd = "git fetch origin main && git checkout 76-feat-hooks-make-the-finder-keybinding-configurable";
+        let mut app = App::new();
+        app.all_rows = vec![make_row(long_cmd, TEST_NOW - 60, 0, "Thoth")];
+        app.recompute();
+        app.selected = 0;
+
+        let text = render_app(&app);
+        // The tail of the command (which used to be cut off with an ellipsis)
+        // must now be visible, wrapped onto later lines.
+        assert!(
+            text.contains("keybinding-configurable"),
+            "preview must show the full command, got:\n{text}"
+        );
     }
 
     #[test]

@@ -77,4 +77,4 @@ _tth_widget() {
 }
 
 zle -N _tth_widget
-bindkey '^R' _tth_widget
+bindkey '__THOTH_KEYBIND__' _tth_widget

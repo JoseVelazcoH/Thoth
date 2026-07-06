@@ -39,8 +39,8 @@ record-and-replay **workspaces**, a themeable vim-style TUI, and a finder-style 
   whole sequence in order, in your shell.
 - **Vim-style modal TUI** - `Esc` for normal mode, `j/k` to move, `d` to delete, `e` to
   edit, `?` for help.
-- **Themeable** - 7 built-in themes (including the Catppuccin flavors) plus your own, with
-  quick switching via `tth theme <name>`.
+- **Themeable** - 11 built-in themes (Catppuccin flavors, Dracula, Tokyo Night, Rosé Pine,
+  Solarized, and more) plus your own, with quick switching via `tth theme <name>`.
 - **Sessions, stats, export, and tags** for organizing and reusing your history.
 - **Private by default** - Thoth's own commands and anything matching your history filter
   are never recorded, and everything lives in a local SQLite database.
@@ -79,7 +79,7 @@ exec $SHELL     # reload your shell, or open a new terminal
 
 ## Quick start
 
-- Press **`Ctrl-R`** to open the interactive search.
+- Press **`Ctrl-R`** to open the interactive search (rebindable via `[shell] keybinding`).
 - **Type** to fuzzy-filter across the command, project, directory, and tags.
 - Press **`Esc`** for normal mode, then **`:`** to open the filter cmdline
   (e.g. `project:thoth exit:fail`), or **`?`** for help.
