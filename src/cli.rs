@@ -1,4 +1,7 @@
 use clap::{Parser, Subcommand};
+use crossterm::style::{ResetColor, SetBackgroundColor, SetForegroundColor};
+use ratatui::backend::IntoCrossterm;
+use ratatui::style::Color;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -306,11 +309,17 @@ pub struct ThemeArgs {
 #[derive(clap::Subcommand, Debug, Clone)]
 pub enum ThemeAction {
     #[command(about = "Preview the given theme")]
-    Preview,
+    Preview(ThemePreviewArgs),
     #[command(about = "List available themes")]
     List,
     #[command(about = "Sets the given theme")]
     Set(ThemeSetArgs),
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ThemePreviewArgs {
+    #[arg(help = "Theme name to preview")]
+    pub name: String,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -709,8 +718,18 @@ pub fn run() -> Result<(), crate::error::ThothError> {
             let cfg = crate::config::load();
             let themes_dir = crate::config::resolve_themes_dir();
             match args.action {
-                ThemeAction::Preview => {
-                    println!("Current theme: {}", cfg.theme.name);
+                ThemeAction::Preview(a) => {
+                    if !crate::config::theme_exists(&a.name, &themes_dir) {
+                        return unknown_theme_error(&a.name, &themes_dir);
+                    }
+                    if !crate::config::use_color() {
+                        println!("Theme: {}", cfg.theme.name);
+                        println!("Colors are disabled. No preview available.");
+                        return Ok(());
+                    }
+
+                    let theme = crate::config::resolve_theme(&a.name, &themes_dir);
+                    preview_theme_colors(&theme, &a.name)?;
                 }
                 ThemeAction::List => {
                     let current = &cfg.theme.name;
@@ -736,13 +755,7 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                 }
                 ThemeAction::Set(a) => {
                     if !crate::config::theme_exists(&a.name, &themes_dir) {
-                        let builtin_list = crate::theme::builtin_names().join(", ");
-                        return Err(crate::error::ThothError::Config(format!(
-                            "unknown theme '{}'; built-in themes: {}; user themes go in {}",
-                            a.name,
-                            builtin_list,
-                            themes_dir.display()
-                        )));
+                        return unknown_theme_error(&a.name, &themes_dir);
                     }
                     crate::config::write_set("theme.name", &a.name)?;
                     println!("Theme set to '{}'. Reopen the TUI to see it.", a.name);
@@ -751,6 +764,63 @@ pub fn run() -> Result<(), crate::error::ThothError> {
         }
     }
     Ok(())
+}
+
+pub fn preview_theme_colors(
+    theme: &crate::theme::Theme,
+    theme_name: &str,
+) -> Result<(), crate::error::ThothError> {
+    let print_color_line = |label: &str, color: Color| -> Result<(), crate::error::ThothError> {
+        let crossterm_color = color.into_crossterm();
+
+        print!("    {:<14}", label);
+        print!("{}{}  ", SetForegroundColor(crossterm_color), "██");
+        println!("{}{}", SetBackgroundColor(crossterm_color), ResetColor,);
+        Ok(())
+    };
+
+    println!("Theme: {}\n", theme_name);
+
+    print_color_line("selection_bg", theme.selection_bg)?;
+    print_color_line("selection_fg", theme.selection_fg)?;
+    print_color_line("accent", theme.accent)?;
+    print_color_line("dim", theme.dim)?;
+    print_color_line("border", theme.border)?;
+    print_color_line("ok", theme.ok)?;
+    print_color_line("fail", theme.fail)?;
+    print_color_line("project", theme.project)?;
+    print_color_line("command", theme.command)?;
+    print_color_line("header", theme.header)?;
+    print_color_line("controls", theme.controls)?;
+    print_color_line("directory", theme.directory)?;
+    print_color_line("tags", theme.tags)?;
+
+    Ok(())
+
+    // Theme: {name}
+    //
+    //     selection_bg     ██  #000000
+    //     selection_fg     ██  #FF0000
+    //     accent           ██  #AA0000
+    //     dim              ██  #00bb00
+    //     border           ██  #000000
+    //     ok               ██  #000000
+    //     fail             ██  #003300
+    //     project          ██  #000000
+    //     command          ██  #220000
+    //     header           ██  #000000
+    //     controls         ██  #000099
+    //     directory        ██  #000000
+    //     tags             ██  #909900
+}
+fn unknown_theme_error(name: &str, themes_dir: &PathBuf) -> Result<(), crate::error::ThothError> {
+    let builtin_list = crate::theme::builtin_names().join(", ");
+    return Err(crate::error::ThothError::Config(format!(
+        "unknown theme '{}'; built-in themes: {}; user themes go in {}",
+        name,
+        builtin_list,
+        themes_dir.display()
+    )));
 }
 
 fn which_tth() -> bool {
