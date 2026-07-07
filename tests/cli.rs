@@ -585,3 +585,35 @@ fn doctor_exits_0_and_prints_checklist() {
                 .and(predicate::str::contains("prompt tags visibility")),
         );
 }
+
+#[test]
+fn builtins_theme_preview_contains_fields() {
+    let theme_list = thoth::theme::builtin_names();
+    let field_list = [
+        "selection_bg",
+        "selection_fg",
+        "accent",
+        "dim",
+        "border",
+        "ok",
+        "fail",
+        "project",
+        "command",
+        "header",
+        "controls",
+        "directory",
+        "tags",
+    ];
+
+    for theme in theme_list {
+        let output = tth().args(["theme", "preview", theme]).output().unwrap();
+        assert!(output.status.success(), "tth theme preview must exit 0");
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        for field in field_list {
+            assert!(
+                stdout.contains(field),
+                "theme field not present; got:\n{stdout}"
+            );
+        }
+    }
+}

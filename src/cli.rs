@@ -722,14 +722,9 @@ pub fn run() -> Result<(), crate::error::ThothError> {
                     if !crate::config::theme_exists(&a.name, &themes_dir) {
                         return unknown_theme_error(&a.name, &themes_dir);
                     }
-                    if !crate::config::use_color() {
-                        println!("Theme: {}", cfg.theme.name);
-                        println!("Colors are disabled. No preview available.");
-                        return Ok(());
-                    }
-
+                    let use_color = crate::config::use_color();
                     let theme = crate::config::resolve_theme(&a.name, &themes_dir);
-                    preview_theme_colors(&theme, &a.name)?;
+                    preview_theme_colors(&theme, &a.name, use_color)?;
                 }
                 ThemeAction::List => {
                     let current = &cfg.theme.name;
@@ -769,6 +764,7 @@ pub fn run() -> Result<(), crate::error::ThothError> {
 pub fn preview_theme_colors(
     theme: &crate::theme::Theme,
     theme_name: &str,
+    use_color: bool,
 ) -> Result<(), crate::error::ThothError> {
     let print_color_line = |label: &str, color: Color| -> Result<(), crate::error::ThothError> {
         let crossterm_color = color.into_crossterm();
@@ -776,32 +772,41 @@ pub fn preview_theme_colors(
         print!("    {:<14}", label);
         print!("{}  ██", SetForegroundColor(crossterm_color));
         println!(
-            // "{}{}  {}",
-            "{}{}",
+            "{}{}  {}",
             SetBackgroundColor(crossterm_color),
             ResetColor,
-            // color
+            color
         );
+        Ok(())
+    };
+
+    let print_no_color_line = |label: &str, color: Color| -> Result<(), crate::error::ThothError> {
+        print!("    {:<14}", label);
+        println!("  {}", color);
         Ok(())
     };
 
     println!("Theme: {}\n", theme_name);
 
-    print_color_line("selection_bg", theme.selection_bg)?;
-    print_color_line("selection_fg", theme.selection_fg)?;
-    print_color_line("accent", theme.accent)?;
-    print_color_line("dim", theme.dim)?;
-    print_color_line("border", theme.border)?;
-    print_color_line("ok", theme.ok)?;
-    print_color_line("fail", theme.fail)?;
-    print_color_line("project", theme.project)?;
-    print_color_line("command", theme.command)?;
-    print_color_line("header", theme.header)?;
-    print_color_line("controls", theme.controls)?;
-    print_color_line("directory", theme.directory)?;
-    print_color_line("tags", theme.tags)?;
+    let print_line = if use_color {
+        print_color_line
+    } else {
+        print_no_color_line
+    };
 
-    Ok(())
+    print_line("selection_bg", theme.selection_bg)?;
+    print_line("selection_fg", theme.selection_fg)?;
+    print_line("accent", theme.accent)?;
+    print_line("dim", theme.dim)?;
+    print_line("border", theme.border)?;
+    print_line("ok", theme.ok)?;
+    print_line("fail", theme.fail)?;
+    print_line("project", theme.project)?;
+    print_line("command", theme.command)?;
+    print_line("header", theme.header)?;
+    print_line("controls", theme.controls)?;
+    print_line("directory", theme.directory)?;
+    print_line("tags", theme.tags)?;
 
     // Theme: {name}
     //
@@ -818,6 +823,8 @@ pub fn preview_theme_colors(
     //     controls         ██  #000099
     //     directory        ██  #000000
     //     tags             ██  #909900
+
+    Ok(())
 }
 fn unknown_theme_error(name: &str, themes_dir: &Path) -> Result<(), crate::error::ThothError> {
     let builtin_list = crate::theme::builtin_names().join(", ");
