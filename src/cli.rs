@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use crossterm::style::{ResetColor, SetBackgroundColor, SetForegroundColor};
 use ratatui::backend::IntoCrossterm;
 use ratatui::style::Color;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser)]
@@ -774,8 +774,14 @@ pub fn preview_theme_colors(
         let crossterm_color = color.into_crossterm();
 
         print!("    {:<14}", label);
-        print!("{}{}  ", SetForegroundColor(crossterm_color), "██");
-        println!("{}{}", SetBackgroundColor(crossterm_color), ResetColor,);
+        print!("{}  ██", SetForegroundColor(crossterm_color));
+        println!(
+            // "{}{}  {}",
+            "{}{}",
+            SetBackgroundColor(crossterm_color),
+            ResetColor,
+            // color
+        );
         Ok(())
     };
 
@@ -813,14 +819,14 @@ pub fn preview_theme_colors(
     //     directory        ██  #000000
     //     tags             ██  #909900
 }
-fn unknown_theme_error(name: &str, themes_dir: &PathBuf) -> Result<(), crate::error::ThothError> {
+fn unknown_theme_error(name: &str, themes_dir: &Path) -> Result<(), crate::error::ThothError> {
     let builtin_list = crate::theme::builtin_names().join(", ");
-    return Err(crate::error::ThothError::Config(format!(
+    Err(crate::error::ThothError::Config(format!(
         "unknown theme '{}'; built-in themes: {}; user themes go in {}",
         name,
         builtin_list,
         themes_dir.display()
-    )));
+    )))
 }
 
 fn which_tth() -> bool {
