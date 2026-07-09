@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Parser)]
 #[command(
     name = "tth",
+    version,
     arg_required_else_help = false,
     about = "Thoth: an intelligent shell history that captures commands with context",
     long_about = "Thoth records every command you run along with its working directory, \
@@ -841,4 +842,23 @@ fn read_framework_config(framework: &crate::prompt::PromptFramework, home: &str)
         PromptFramework::Generic => return None,
     };
     std::fs::read_to_string(config_path).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_definition_is_valid() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn cli_exposes_package_version() {
+        assert_eq!(
+            Cli::command().get_version(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+    }
 }
