@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use crossterm::style::{ResetColor, SetBackgroundColor, SetForegroundColor};
+use crossterm::style::{ResetColor, SetForegroundColor};
 use ratatui::backend::IntoCrossterm;
 use ratatui::style::Color;
 use std::path::{Path, PathBuf};
@@ -770,13 +770,8 @@ pub fn preview_theme_colors(
         let crossterm_color = color.into_crossterm();
 
         print!("    {:<14}", label);
-        print!("{}  ██", SetForegroundColor(crossterm_color));
-        println!(
-            "{}{}  {}",
-            SetBackgroundColor(crossterm_color),
-            ResetColor,
-            color
-        );
+        print!("{}  ██{}", SetForegroundColor(crossterm_color), ResetColor);
+        println!("  {}", color);
         Ok(())
     };
 
@@ -807,22 +802,6 @@ pub fn preview_theme_colors(
     print_line("controls", theme.controls)?;
     print_line("directory", theme.directory)?;
     print_line("tags", theme.tags)?;
-
-    // Theme: {name}
-    //
-    //     selection_bg     ██  #000000
-    //     selection_fg     ██  #FF0000
-    //     accent           ██  #AA0000
-    //     dim              ██  #00bb00
-    //     border           ██  #000000
-    //     ok               ██  #000000
-    //     fail             ██  #003300
-    //     project          ██  #000000
-    //     command          ██  #220000
-    //     header           ██  #000000
-    //     controls         ██  #000099
-    //     directory        ██  #000000
-    //     tags             ██  #909900
 
     Ok(())
 }
